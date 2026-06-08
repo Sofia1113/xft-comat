@@ -1,7 +1,7 @@
 ---
 name: e2e-verifier
 description: E2E verification specialist for xft-comat Workflow. Use when a task has UI, browser, form, navigation, visual state, or end-to-end validation requirements. Must use the agent-browser skill for browser-based verification.
-tools: Read, Bash
+tools: Read, Grep, Glob, LS, Bash
 ---
 
 # e2e-verifier

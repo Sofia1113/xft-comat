@@ -1,0 +1,17 @@
+{
+  "name": "xft-comat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline installer for the xft-comat Codex plugin.",
+  "bin": {
+    "xft-comat-install-codex": "./scripts/install-codex-offline.mjs"
+  },
+  "scripts": {
+    "install:codex": "node ./scripts/install-codex-offline.mjs",
+    "install:codex:dry-run": "node ./scripts/install-codex-offline.mjs --dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# obt-watch — 持续心跳监控。每 2 秒输出一行 NDJSON 状态供 Monitor 工具消费。
+# 设计：每行包含 ts、session 存活、最近 5 行末尾、距上次屏幕变化的秒数（idle_sec）。
+set -euo pipefail
+
+SESSION="${XFT_COMAT_TMUX_SESSION:-xft-comat-test}"
+INTERVAL="${XFT_COMAT_WATCH_INTERVAL:-2}"
+SNAP_HASH=""
+LAST_CHANGE=$(date +%s)
+
+# stderr 一个 ready 标记，方便 Monitor 知道脚本起来了。
+echo "[obt-watch] ready session=$SESSION interval=${INTERVAL}s" >&2
+
+while true; do
+  if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "{\"ts\":\"$(date -Iseconds)\",\"session\":\"$SESSION\",\"alive\":false,\"event\":\"session_ended\"}"
+    exit 0
+  fi
+  SNAP=$(tmux capture-pane -p -t "$SESSION" -S -50 2>/dev/null || echo "")
+  HASH=$(printf '%s' "$SNAP" | shasum | awk '{print $1}')
+  NOW=$(date +%s)
+  if [ "$HASH" != "$SNAP_HASH" ]; then
+    SNAP_HASH="$HASH"
+    LAST_CHANGE="$NOW"
+  fi
+  IDLE=$((NOW - LAST_CHANGE))
+  # 末 5 行（用 jq 安全转义；没有 jq 时退化为空字符串）。
+  TAIL=$(printf '%s' "$SNAP" | tail -n 5 | jq -Rsa . 2>/dev/null || echo '""')
+  printf '{"ts":"%s","session":"%s","alive":true,"idle_sec":%d,"tail":%s}\n' \
+    "$(date -Iseconds)" "$SESSION" "$IDLE" "$TAIL"
+  sleep "$INTERVAL"
+done

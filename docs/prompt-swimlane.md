@@ -1,4 +1,4 @@
-A wide horizontal diagram with FIVE vertical swimlanes, plus a shared common-steps band on top and a shared closing node at the bottom. Rendered in Anthropic Claude's official brand UI style.
+A wide horizontal diagram with FIVE vertical swimlanes, plus a shared pre-route common-steps band on top, a shared final-route node below it, and a shared closing node at the bottom. Rendered in Anthropic Claude's official brand UI style.
 
 STYLE (strict):
 - Background: warm off-white cream (#F0EEE6).
@@ -9,7 +9,7 @@ STYLE (strict):
 
 CONTENT — title "xft-comat Workflow Swimlanes (5 modes)".
 
-TOP shared band (orange, spanning full width) labeled "Common steps (all modes)" containing three nodes left-to-right: "receive" -> "explore & clarify" -> "final-route". An arrow fans down from this band into all five lanes below.
+TOP shared band (orange, spanning full width) labeled "Pre-route common steps (all modes)" containing two nodes left-to-right: "receive" -> "explore & clarify". Below this band, place one centered orange node labeled "final-route" with a short arrow from "explore & clarify" to it. An arrow fans down from "final-route" into all five lanes below.
 
 FIVE vertical swimlanes side by side, each with a header label and its own top-to-bottom stage nodes:
 

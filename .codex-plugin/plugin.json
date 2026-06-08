@@ -1,0 +1,38 @@
+{
+  "name": "xft-comat",
+  "version": "0.1.0",
+  "description": "xft-comat Workflow is a lightweight, program-driven AI coding workflow for non-trivial features, bug fixes, and refactors with routed complexity, specialist guidance, TDD, review, validation, and traceable .xft-comat records.",
+  "author": {
+    "name": "jiangshenyu",
+    "email": "jiangshenyu12306@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "ai-coding",
+    "tdd",
+    "agents",
+    "xft-comat",
+    "code-review",
+    "e2e"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "xft-comat",
+    "shortDescription": "Program-driven coding workflow with traceable delivery records.",
+    "longDescription": "A lightweight workflow plugin for non-trivial features, bug fixes, and refactors. It helps route work by complexity, maintain .xft-comat records, and guide TDD, review, and validation.",
+    "developerName": "jiangshenyu",
+    "category": "Productivity",
+    "capabilities": [
+      "Workflow",
+      "Testing",
+      "Code Review"
+    ],
+    "defaultPrompt": [
+      "Use xft-comat to deliver this change with traceability.",
+      "Run the xft-comat workflow for this bug fix.",
+      "Plan and validate this refactor with xft-comat."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Architecture option specialist for xft-comat Workflow. Use for medium or hard feature work that needs design options, trade-offs, risk analysis, and explicit user decisions before implementation.
-tools: Read, Bash
+tools: Read, Grep, Glob, LS, Bash
 ---
 
 # architect

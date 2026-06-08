@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# obt-send <text|@key> [...]
+#   普通参数 → send-keys -l <text>（字面文本，不解析）
+#   以 @ 开头 → 当作 tmux key 名（@Enter @Down @Up @Escape @Space @Tab）
+set -euo pipefail
+
+SESSION="${XFT_COMAT_TMUX_SESSION:-xft-comat-test}"
+
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  echo "[obt-send] session '$SESSION' not running" >&2
+  exit 2
+fi
+
+if [ $# -eq 0 ]; then
+  echo "usage: obt-send <text|@key> [...]" >&2
+  exit 1
+fi
+
+for arg in "$@"; do
+  if [[ "$arg" == @* ]]; then
+    KEY="${arg#@}"
+    tmux send-keys -t "$SESSION" "$KEY"
+  else
+    tmux send-keys -t "$SESSION" -l "$arg"
+  fi
+  sleep 0.1
+done

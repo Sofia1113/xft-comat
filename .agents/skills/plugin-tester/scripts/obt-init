@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# obt-init — 首次初始化 xft-comat 测试 sandbox（git + Node 脚手架）。已存在则跳过初始化但确保结构。
+set -euo pipefail
+
+SANDBOX="${XFT_COMAT_SANDBOX:-$HOME/WorkSpace/xft-comat-sandbox}"
+
+mkdir -p "$SANDBOX"
+cd "$SANDBOX"
+
+if [ ! -d .git ]; then
+  git init -q
+  git config user.email "xft-comat-test@local"
+  git config user.name "xft-comat Tester"
+fi
+
+if [ ! -f package.json ]; then
+  cat > package.json <<'EOF'
+{
+  "name": "xft-comat-sandbox",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  }
+}
+EOF
+fi
+
+if [ ! -f README.md ]; then
+  cat > README.md <<'EOF'
+# xft-comat Sandbox
+
+测试 xft-comat 工作流插件用的临时项目。每轮测试前由 `obt-reset` 清空到此初始状态。
+EOF
+fi
+
+if [ ! -f .gitignore ]; then
+  cat > .gitignore <<'EOF'
+node_modules/
+.DS_Store
+.xft-comat/
+EOF
+fi
+
+# 初始 commit（让 reset 有锚点）
+if [ -z "$(git log --oneline 2>/dev/null || true)" ]; then
+  git add -A
+  git -c commit.gpgsign=false commit -q -m "init: sandbox baseline"
+fi
+
+echo "sandbox=$SANDBOX"
+echo "baseline_commit=$(git rev-parse HEAD)"

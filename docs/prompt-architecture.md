@@ -15,15 +15,15 @@ Top title bar: "xft-comat Plugin Architecture"
 Layer 1 (top) — one wide orange-outlined container labeled "Plugin: xft-comat" wrapping everything below.
 
 Layer 2 — three side-by-side cards inside the container:
-- Card A "Skill: pilot" with three small sub-chips: "SKILL.md", "workflowctl.py", "templates/"
+- Card A "Skill: pilot" with three small sub-chips: "SKILL.md", "workflowctl.ts", "templates/"
 - Card B "Agents (8 specialists)"
 - Card C "Docs & Config"
 
-Layer 3 — under Card A, a single highlighted pill labeled "workflowctl.py — sole writer" with a downward arrow pointing to a folder icon labeled ".xft-comat/ (user project)".
+Layer 3 — under Card A, a single highlighted pill labeled "workflowctl.ts — sole writer" with a downward arrow pointing to a folder icon labeled ".xft-comat/ (user project)".
 
 Layer 4 — under Card B, a 2-column grid of 8 small agent chips, each text label exactly:
 "conductor", "architect", "tdd-engineer", "bug-diagnostician", "refactor-specialist", "e2e-verifier", "code-reviewer", "skill-scout".
 
-A clean labeled arrow from "Skill: pilot" to "Agents" reading "dispatch", and an arrow from "workflowctl.py" to ".xft-comat/" reading "writes".
+A clean labeled arrow from "Skill: pilot" to "Agents" reading "dispatch", and an arrow from "workflowctl.ts" to ".xft-comat/" reading "writes".
 
 Keep all text in clean English, minimal words, high legibility, no gibberish. 16:9 landscape, balanced composition, plenty of negative space.

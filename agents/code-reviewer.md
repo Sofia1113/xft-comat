@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Code review specialist for xft-comat Workflow. Use after implementation to find correctness bugs, regressions, missing tests, state/concurrency issues, edge cases, and maintainability problems. Inspired by Claude official code-review skill.
-tools: Read, Bash, LSP
+tools: Read, Grep, Glob, LS, Bash
 ---
 
 # code-reviewer

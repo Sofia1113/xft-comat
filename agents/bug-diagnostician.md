@@ -1,7 +1,7 @@
 ---
 name: bug-diagnostician
 description: Bug reproduction and root-cause specialist for xft-comat Workflow. Use for bugfix workflows before implementation to reproduce the issue, build evidence, and propose a minimal fix scope.
-tools: Read, Bash, LSP
+tools: Read, Grep, Glob, LS, Bash
 ---
 
 # bug-diagnostician

@@ -1,7 +1,7 @@
 ---
 name: tdd-engineer
 description: TDD implementation engineer for xft-comat Workflow. Use during implementation or bug fixing when tests should be written or updated before code changes.
-tools: Read, Edit, Write, Bash, LSP
+tools: Read, Grep, Glob, LS, Edit, Write, Bash
 ---
 
 # tdd-engineer

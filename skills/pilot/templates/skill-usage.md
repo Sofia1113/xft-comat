@@ -5,11 +5,11 @@
 
 ## 候选 skill
 
-初始化后改写：记录实现前通过 `skills list` 建议出的 skill，以及是否需要询问用户；只记录会实质改变执行方式的候选项。无候选时写明“无候选 skill”。
+初始化后改写：记录实现前通过 `skills list` 发现的相关 skill、决策和是否需要询问用户；只记录会实质改变执行方式的候选项。无候选时写明“无候选 skill”。
 
 ## Agent 参与记录
 
-初始化后改写：记录 specialist agent 的实际产出或未使用原因；hard 流程必须覆盖 conductor、architect、tdd-engineer、code-reviewer，涉及 UI/E2E 时还必须覆盖 e2e-verifier。需求澄清由主会话主持，无需点名 specialist。
+初始化后改写：记录 specialist agent 的实际产出或未使用原因；hard 流程必须覆盖 Claude 插件作用域下的 `xft-comat:conductor`、`xft-comat:architect`、`xft-comat:tdd-engineer`、`xft-comat:code-reviewer`，涉及 UI/E2E 时还必须覆盖 `xft-comat:e2e-verifier`。需求澄清由主会话主持，无需点名 specialist。
 
 ## 固定规则
 
@@ -20,4 +20,4 @@
 
 ## 使用记录
 
-初始化后改写：本节由 `record-skill` 命令程序追加（追加位置自动落入本章节，与章节在文档中的位置无关），每条记录一个 required/accepted/skipped skill 的决策、原因与实质参与证据，格式为 `- \`skill-name\` — 决策 — 原因 — 证据：…`；required 记录必须带“证据：”字段。若全程没有任何 skill 实质参与，写明“无 skill 实质参与，因为……”。交付前删除本说明行，只保留实际记录。
+初始化后改写：本节由 `record-skill` 命令程序追加（追加位置自动落入本章节，与章节在文档中的位置无关），每条记录一个 `required`/`accepted`/`declined`/`skipped` skill 决策、原因与实质参与证据，格式为 `- \`skill-name\` — 决策 — 原因 — 证据：...`；required 记录必须带“证据：”字段。若全程没有任何 skill 实质参与，写明“无 skill 实质参与，因为...”。交付前删除本说明行，只保留实际记录。

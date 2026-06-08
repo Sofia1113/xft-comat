@@ -1,7 +1,7 @@
 ---
 name: refactor-specialist
 description: Behavior-preserving refactor specialist for xft-comat Workflow. Use for refactors that must preserve external behavior while improving structure, reuse, naming, or maintainability.
-tools: Read, Edit, Write, Bash, LSP
+tools: Read, Grep, Glob, LS, Edit, Write, Bash
 ---
 
 # refactor-specialist
