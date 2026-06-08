@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# obt-start <prompt> — 在 tmux 新会话里启动 claude，加载 xft-comat 插件，发送 <entrypoint> <prompt>。
+# 不阻塞。返回 session 名 + 日志文件路径。
+set -euo pipefail
+
+PROMPT="${1:?usage: obt-start <prompt>}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_PLUGIN="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+SANDBOX="${XFT_COMAT_SANDBOX:-$HOME/WorkSpace/xft-comat-sandbox}"
+PLUGIN="${XFT_COMAT_PLUGIN:-$DEFAULT_PLUGIN}"
+SESSION="${XFT_COMAT_TMUX_SESSION:-xft-comat-test}"
+ENTRYPOINT="${XFT_COMAT_ENTRYPOINT:-/xft-comat:pilot}"
+MODEL="${XFT_COMAT_MODEL:-sonnet}"
+LOG="/tmp/xft-comat-test-${SESSION}.log"
+
+if [ ! -d "$SANDBOX" ]; then
+  echo "ERROR: sandbox not initialized at $SANDBOX (run obt-init first)" >&2
+  exit 1
+fi
+if [ ! -d "$PLUGIN" ]; then
+  echo "ERROR: plugin not found at $PLUGIN" >&2
+  exit 1
+fi
+if [ ! -f "$PLUGIN/.claude-plugin/plugin.json" ]; then
+  echo "ERROR: plugin manifest not found at $PLUGIN/.claude-plugin/plugin.json" >&2
+  exit 1
+fi
+
+# 已有同名 session → 强 kill（同一时刻只允许一个测试会话，避免状态混淆）。
+tmux kill-session -t "$SESSION" 2>/dev/null || true
+: > "$LOG"
+
+# pipe-pane 把 tmux 全部输出落到 LOG，供后续 obt-snap / Monitor 读。
+tmux new-session -d -s "$SESSION" -x 220 -y 50 -c "$SANDBOX" \
+  "claude --plugin-dir '$PLUGIN' --model '$MODEL' --dangerously-skip-permissions --permission-mode bypassPermissions"
+tmux pipe-pane -t "$SESSION" -o "cat >> '$LOG'"
+
+# 等 claude TUI 完全就绪（最多 15 秒）。
+READY=0
+for i in $(seq 1 75); do
+  sleep 0.2
+  if tmux capture-pane -p -t "$SESSION" -S -50 2>/dev/null | grep -qE "(bypass permissions|accept edits|plan mode|default mode|shift\+tab to cycle)"; then
+    READY=1
+    break
+  fi
+done
+if [ "$READY" -ne 1 ]; then
+  echo "WARN: TUI ready 信号未在 15s 内出现，可能 send-keys 会被吞" >&2
+fi
+sleep 0.8
+
+# 发送 prompt + Enter（用 literal flag 避免 tmux 解析特殊字符）。
+tmux send-keys -t "$SESSION" -l "$ENTRYPOINT $PROMPT"
+sleep 0.5
+tmux send-keys -t "$SESSION" Enter
+
+echo "session=$SESSION"
+echo "log=$LOG"
+echo "sandbox=$SANDBOX"
+echo "plugin=$PLUGIN"
+echo "entrypoint=$ENTRYPOINT"
+echo "model=$MODEL"
+echo "prompt=$PROMPT"

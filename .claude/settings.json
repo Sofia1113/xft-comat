@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Grep",
+      "LSP",
+      "Agent",
+      "TaskCreate",
+      "TaskUpdate",
+      "TaskList",
+      "TaskGet",
+      "Monitor",
+      "WebSearch",
+      "WebFetch",
+      "NotebookEdit",
+      "AskUserQuestion",
+      "Skill"
+    ],
+    "projects": {
+      "allow": [
+        "Bash",
+        "Edit",
+        "Write",
+        "Read",
+        "Glob",
+        "Grep",
+        "LSP",
+        "Agent",
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskList",
+        "TaskGet",
+        "Monitor",
+        "WebSearch",
+        "WebFetch"
+      ]
+    }
+  }
+}

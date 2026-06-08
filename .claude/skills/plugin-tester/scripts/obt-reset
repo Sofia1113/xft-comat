@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# obt-reset — 把 sandbox 重置到 baseline commit。清掉本轮测试生成的源码 / .xft-comat/ / node_modules 等。
+# 保留 .git。如果 baseline 不存在则先调用 obt-init。
+set -euo pipefail
+
+SANDBOX="${XFT_COMAT_SANDBOX:-$HOME/WorkSpace/xft-comat-sandbox}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ ! -d "$SANDBOX/.git" ]; then
+  exec "$SCRIPT_DIR/obt-init"
+fi
+
+cd "$SANDBOX"
+
+# 硬重置到 baseline（第一个 commit），删除所有 untracked / ignored 文件。
+BASELINE=$(git rev-list --max-parents=0 HEAD | head -1)
+git reset --hard -q "$BASELINE"
+git clean -fdxq
+
+echo "sandbox=$SANDBOX"
+echo "reset_to=$BASELINE"
+echo "tree_clean=$(git status --short | wc -l | xargs)"

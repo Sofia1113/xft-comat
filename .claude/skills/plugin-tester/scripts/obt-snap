@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# obt-snap [lines] — 抓取 tmux 当前可视屏幕（默认全部 scrollback 最近 N 行）。
+set -euo pipefail
+
+SESSION="${XFT_COMAT_TMUX_SESSION:-xft-comat-test}"
+LINES="${1:-200}"
+
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  echo "[obt-snap] session '$SESSION' not running" >&2
+  exit 2
+fi
+
+tmux capture-pane -p -t "$SESSION" -S "-$LINES"

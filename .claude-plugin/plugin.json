@@ -1,0 +1,19 @@
+{
+  "name": "xft-comat",
+  "version": "0.1.0",
+  "description": "xft-comat Workflow — a lightweight, program-driven AI coding workflow for non-trivial features, bug fixes, and refactors. Provides routed complexity, specialist subagents, TDD, E2E validation, and traceable .xft-comat records.",
+  "author": {
+    "name": "jiangshenyu",
+    "email": "jiangshenyu12306@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "ai-coding",
+    "tdd",
+    "agents",
+    "xft-comat",
+    "code-review",
+    "e2e"
+  ]
+}

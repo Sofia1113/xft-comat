@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# obt-stop — kill tmux session。dump 完整 scrollback 到 /tmp/xft-comat-test-<session>-final-<ts>.log 供事后分析。
+set -euo pipefail
+
+SESSION="${XFT_COMAT_TMUX_SESSION:-xft-comat-test}"
+TS=$(date +%Y%m%d-%H%M%S)
+DUMP="/tmp/xft-comat-test-${SESSION}-final-${TS}.log"
+
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux capture-pane -p -t "$SESSION" -S -100000 > "$DUMP" 2>/dev/null || true
+  tmux kill-session -t "$SESSION"
+  echo "killed=$SESSION"
+  echo "dump=$DUMP"
+else
+  echo "no_session=$SESSION"
+fi
