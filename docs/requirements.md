@@ -40,6 +40,7 @@
 - 流程开始时不能只凭用户首条任务立即做最终工作流定级；对于需求明显模糊、范围可能影响复杂度或风险等级的任务，应先做最小必要的需求澄清，再确认或修正 `feature-simple`、`feature-medium`、`feature-hard`、`bugfix`、`refactor` 等模式。
 - 允许先做脑内临时路由假设以决定澄清深度，但对话一开始不应先执行 `workflowctl.ts route`；`route` 应在公共的接收、轻量探索、需求澄清之后，用澄清后的任务摘要执行。
 - 五种工作流应共享前置公共阶段（接收任务、探索与澄清），最终路由位于公共阶段之后，再进入各 mode 专属阶段，避免一开始让用户等待路由脚本。
+- 五种工作流的阶段必须来自同一组原子阶段；同一语义只能有一个阶段名，不能因为不同 workflow 把相近动作命名为 `targeted-test`、`baseline-test`、`regression-verify`、`verify-equivalence` 等分叉阶段。
 - 该假设必须标记为 provisional，并在澄清后写入最终路由结论。
 - 路由记录必须说明哪些澄清答案影响了最终复杂度评分，避免出现“未澄清就已经定死 hard/medium/simple”的审计断层。
 
@@ -59,7 +60,9 @@
 
 ## Agent 编排要求
 
-- hard 流程必须体现 conductor/指挥者职责：拆分阶段目标、选择必要 agent、汇总 agent 输出、决定是否进入下一阶段，并维护工作流文档。
+- 主会话是工作流编排者，不是文件修改者：主会话不得直接修改任何项目文件、代码文件、测试文件、配置文件或 `.xft-comat` 文档；唯一允许产生文件变更的动作，是调用插件内 `workflowctl.ts` 维护 `.xft-comat/`。
+- 业务代码和测试变更必须由对应 specialist agent 或明确的外部 skill 执行；主会话只做澄清、路由判断、agent 分派、证据核验和最终汇报。
+- hard 流程必须体现 conductor/指挥者职责：拆分阶段目标、选择必要 agent、汇总 agent 输出、决定是否进入下一阶段，并指出哪些结论应由主会话通过 `workflowctl.ts` 写入工作流文档。
 - hard 流程不应主要由主会话独自完成实现、验证和审查；主会话可以协调和整合，但关键阶段应有对应 specialist agent 深度参与。
 - `architect` 应参与方案比较和取舍；`tdd-engineer` 应参与测试优先或回归测试设计；`e2e-verifier` 应参与端到端验证策略或执行；`code-reviewer` 应参与代码审查。
 - 如果某个 specialist agent 没有使用，必须在 `06-skill-usage.md` 或状态记录中说明原因，例如任务降级、用户要求快速执行、agent 不可用或该阶段风险较低。

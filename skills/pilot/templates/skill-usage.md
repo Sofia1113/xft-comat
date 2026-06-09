@@ -9,7 +9,7 @@
 
 ## Agent 参与记录
 
-初始化后改写：记录 specialist agent 的实际产出或未使用原因；hard 流程必须覆盖 Claude 插件作用域下的 `xft-comat:conductor`、`xft-comat:architect`、`xft-comat:tdd-engineer`、`xft-comat:code-reviewer`，涉及 UI/E2E 时还必须覆盖 `xft-comat:e2e-verifier`。需求澄清由主会话主持，无需点名 specialist。
+初始化后改写：本节由 `record-agent` 命令程序维护并整体渲染，不要手改本节。每个 specialist 记一条 `participated`（带 `--evidence` 实质参与证据）或 `skipped`（带 `--reason` 未使用原因）。hard 流程必须覆盖 `conductor`、`architect`、`tdd-engineer`、`code-reviewer`，涉及 UI/E2E 时还须覆盖 `e2e-verifier`。需求澄清由主会话主持，无需点名 specialist。交付前不得保留本说明。
 
 ## 固定规则
 

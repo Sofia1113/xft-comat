@@ -5,11 +5,9 @@
 
 ## 任务
 
-初始化后改写：按实际工作拆分任务，记录 owner、状态、依赖和验收证据；交付前不得保留本行。hard 流程中实现、测试、前端落地、审查修复类任务不得把主会话作为 owner。
+初始化后改写：本节由 `add-task` / `set-task` 命令程序维护并整体渲染，不要手改本文档。用 `add-task` 登记任务拆分、owner、类型（implementation/coordination）与状态；hard 流程实现、测试、前端落地、审查修复类任务不得把主会话作为 owner（须分派 specialist），编排/澄清/拍板/核验类可标 `--kind coordination`。交付前不得保留本说明与下方占位。
 
-建议格式：
-
-- [ ] TASK-001 — 待补充 — owner：待补充（主会话 / xft-comat-* agent / skill）— 依赖：待补充 — 验收证据：待补充（命令、文档、截图或观察结果）
+- [ ] TASK-001 — 待补充 — owner：待补充 — 状态：todo — 类型：implementation
 
 ## 完成定义
 

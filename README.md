@@ -109,5 +109,7 @@ python3 /Users/sofia/.codex/skills/.system/plugin-creator/scripts/validate_plugi
 ## 设计要点
 
 - `.xft-comat` 目录只能通过 `scripts/workflowctl.ts` 维护，不手动编辑。
-- 澄清先行、路由后置：先通过公共阶段 `receive` / `explore-and-clarify` 消除关键不确定性，再用澄清后的任务摘要执行 `route`、`init` 并写 final route；审查必须早于最终验证/E2E。
+- 工作流主会话不得直接修改任何项目文件、代码、测试或配置；主会话只负责编排、澄清、路由、分派和核验证据，唯一允许产生文件变更的动作是调用 `scripts/workflowctl.ts` 更新 `.xft-comat/`。业务代码和测试变更必须交给 specialist agent 或明确的外部 skill。
+- 澄清先行、路由后置：先通过公共阶段 `receive` / `explore-and-clarify` 消除关键不确定性，再用澄清后的任务摘要执行 `route`、`init` 并进入统一的 `route` 阶段；审查统一落在 `review`，最终验证/E2E/等价验证统一落在 `verify`，且 `review` 必须早于 `verify`。
+- 原子阶段统一：5 种 workflow 只拼接 `workflowctl.ts` 内置的通用阶段，不因不同模式为同一语义另造阶段名。
 - 轻量上下文：每个阶段只读必要文档；agent 职责保持原子，不维护工作流目录。
