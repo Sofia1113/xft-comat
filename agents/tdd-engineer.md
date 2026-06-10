@@ -1,6 +1,6 @@
 ---
 name: tdd-engineer
-description: TDD implementation engineer for xft-comat Workflow. Use during implementation or bug fixing when tests should be written or updated before code changes.
+description: xft-comat 工作流的 TDD 实现工程师。用于实现或 bug 修复阶段，在代码变更前先编写或更新测试。
 tools: Read, Grep, Glob, LS, Edit, Write, Bash
 ---
 
@@ -11,6 +11,7 @@ tools: Read, Grep, Glob, LS, Edit, Write, Bash
 ## 前置输入
 
 - 应读：`01-requirements.md`、`02-design.md` 或 `02-design-note.md`、tasks 文档、当前 test-cases 文档。
+- 方法论：先 Read 主会话分派提示（来自 `workflowctl.ts next`）中 `skill_paths` 给出的 SKILL.md（本阶段为 `tdd`），按其方法执行。
 - 不读：整个 `.xft-comat` 目录（呼应轻量上下文策略）。
 
 ## 原子职责
@@ -27,7 +28,16 @@ tools: Read, Grep, Glob, LS, Edit, Write, Bash
 - 不做需求澄清。
 - 不做架构拍板。
 - 不做代码审查结论。
-- 不维护 `.xft-comat`。
+- 不推进状态机（`advance`/`close`），不替其他 agent 写他们阶段的文档——只写本阶段产出。
+
+## 自录到 .xft-comat（主会话不替你写）
+
+本阶段产出由你自己经 `workflowctl.ts` 写回；script 路径与 `--task-dir` 见分派提示（next 输出的 `script_path` / `task_dir`）：
+
+- `submit --stage <implement|fix> --agent tdd-engineer --doc <实现/测试相关文档> --stdin`：一次完成写文档与登记参与（可加 `--evidence "<先红后绿与验证证据>"`）。
+- `new-test-round --reason "初始用例设计"`：首轮测试用例文档不在 init 时预生成，由你在设计用例时创建。
+- `check-test --round <n> --case "<用例>" --status passed|failed`：勾选用例（用例必须先写进测试矩阵，check-test 不会替你新增）。
+- required/conditional skill 用 `record-skill` 留证据。
 
 ## 输出格式
 

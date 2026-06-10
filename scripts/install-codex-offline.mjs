@@ -41,7 +41,7 @@ const args = parseArgs(process.argv.slice(2));
 const manifest = readJson(path.join(PLUGIN_ROOT, ".codex-plugin", "plugin.json"));
 const pluginName = manifest.name;
 if (!pluginName || typeof pluginName !== "string") {
-  fail("Missing .codex-plugin/plugin.json name.");
+  fail("缺少 .codex-plugin/plugin.json 的 name 字段。");
 }
 
 const marketplaceName = args.marketplaceName || DEFAULT_MARKETPLACE_NAME;
@@ -54,27 +54,27 @@ if (args.help) {
   process.exit(0);
 }
 
-log(`Plugin root: ${PLUGIN_ROOT}`);
-log(`Marketplace root: ${marketplaceRoot}`);
-log(`Marketplace name: ${marketplaceName}`);
-log(`Staged plugin: ${stagedPluginDir}`);
+log(`插件根目录：${PLUGIN_ROOT}`);
+log(`Marketplace 根目录：${marketplaceRoot}`);
+log(`Marketplace 名称：${marketplaceName}`);
+log(`暂存插件目录：${stagedPluginDir}`);
 
 if (args.dryRun) {
-  log("Dry run only; no files will be written and no Codex commands will run.");
+  log("仅预览操作；不会写入文件，也不会运行 Codex 命令。");
 } else {
   stagePlugin();
   writeMarketplace();
 }
 
 if (args.skipCodexAdd) {
-  log("Skipped Codex CLI registration because --skip-codex-add was set.");
+  log("已按 --skip-codex-add 跳过 Codex CLI 注册。");
   printManualCommands();
   process.exit(0);
 }
 
 if (args.dryRun) {
-  log(`Would run: codex plugin marketplace add ${shellQuote(marketplaceRoot)}`);
-  log(`Would run: codex plugin add ${pluginName}@${marketplaceName}`);
+  log(`将运行：codex plugin marketplace add ${shellQuote(marketplaceRoot)}`);
+  log(`将运行：codex plugin add ${pluginName}@${marketplaceName}`);
   process.exit(0);
 }
 
@@ -83,7 +83,7 @@ runCodexCommand(["plugin", "marketplace", "add", marketplaceRoot], {
 });
 runCodexCommand(["plugin", "add", `${pluginName}@${marketplaceName}`]);
 
-log("Installed xft-comat into Codex. Start a new Codex thread to load the plugin.");
+log("已将 xft-comat 安装到 Codex。请新开一个 Codex thread 以加载插件。");
 
 function parseArgs(rawArgs) {
   const parsed = {
@@ -106,7 +106,7 @@ function parseArgs(rawArgs) {
     } else if (arg === "--marketplace-root") {
       parsed.marketplaceRoot = requireValue(rawArgs, ++i, arg);
     } else {
-      fail(`Unknown argument: ${arg}`);
+      fail(`无法识别的参数：${arg}`);
     }
   }
   return parsed;
@@ -115,29 +115,29 @@ function parseArgs(rawArgs) {
 function requireValue(rawArgs, index, flag) {
   const value = rawArgs[index];
   if (!value || value.startsWith("--")) {
-    fail(`Missing value for ${flag}.`);
+    fail(`参数 ${flag} 缺少取值。`);
   }
   return value;
 }
 
 function printHelp() {
-  console.log(`Install xft-comat into Codex from local files.
+  console.log(`从本地文件安装 xft-comat 到 Codex。
 
-Usage:
+用法：
   node scripts/install-codex-offline.mjs [options]
 
-Options:
-  --dry-run                  Print planned actions without writing files.
-  --skip-codex-add           Stage files and marketplace JSON, but do not run codex commands.
-  --marketplace-root <path>  Local marketplace root. Default: ${DEFAULT_MARKETPLACE_ROOT}
-  --marketplace-name <name>  Marketplace name. Default: ${DEFAULT_MARKETPLACE_NAME}
-  -h, --help                 Show this help.
+选项：
+  --dry-run                  只打印计划执行的操作，不写入文件。
+  --skip-codex-add           暂存文件并生成 marketplace JSON，但不运行 codex 命令。
+  --marketplace-root <path>  本地 marketplace 根目录。默认：${DEFAULT_MARKETPLACE_ROOT}
+  --marketplace-name <name>  marketplace 名称。默认：${DEFAULT_MARKETPLACE_NAME}
+  -h, --help                 显示帮助。
 `);
 }
 
 function stagePlugin() {
   if (isSubpath(stagedPluginDir, PLUGIN_ROOT) || path.resolve(stagedPluginDir) === PLUGIN_ROOT) {
-    fail("Refusing to stage the plugin inside the source plugin directory.");
+    fail("拒绝把插件暂存在源插件目录内部。");
   }
   rmSync(stagedPluginDir, { force: true, recursive: true });
   mkdirSync(stagedPluginDir, { recursive: true });
@@ -145,9 +145,11 @@ function stagePlugin() {
     ".codex-plugin",
     ".claude-plugin",
     "agents",
+    "commands",
     "docs",
     "skills",
     "scripts",
+    "workflow",
     "README.md",
     "package.json",
   ]) {
@@ -160,7 +162,7 @@ function stagePlugin() {
       filter: shouldCopy,
     });
   }
-  log("Staged plugin files.");
+  log("已暂存插件文件。");
 }
 
 function shouldCopy(source) {
@@ -191,8 +193,8 @@ function writeMarketplace() {
   }
   if (marketplace.name !== marketplaceName) {
     fail(
-      `Marketplace already exists with name "${marketplace.name}". ` +
-        `Use --marketplace-name ${marketplace.name} or choose a different --marketplace-root.`,
+      `Marketplace 已存在，名称为 "${marketplace.name}"。` +
+        `请使用 --marketplace-name ${marketplace.name}，或选择不同的 --marketplace-root。`,
     );
   }
   if (!marketplace.interface || typeof marketplace.interface !== "object") {
@@ -222,19 +224,19 @@ function writeMarketplace() {
   }
 
   writeFileSync(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf-8");
-  log(`Wrote marketplace: ${marketplacePath}`);
+  log(`已写入 marketplace：${marketplacePath}`);
 }
 
 function runCodexCommand(commandArgs, options = {}) {
   const printable = `codex ${commandArgs.map(shellQuote).join(" ")}`;
-  log(`Running: ${printable}`);
+  log(`正在运行：${printable}`);
   const result = spawnSync("codex", commandArgs, {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
   });
 
   if (result.error) {
-    console.error(`Unable to run "${printable}": ${result.error.message}`);
+    console.error(`无法运行 "${printable}"：${result.error.message}`);
     printManualCommands();
     process.exit(1);
   }
@@ -245,10 +247,10 @@ function runCodexCommand(commandArgs, options = {}) {
       options.continueOnAlreadyConfigured &&
       /already|exists|configured|duplicate/i.test(output)
     ) {
-      log("Marketplace appears to be already configured; continuing.");
+      log("Marketplace 似乎已经配置过，继续执行。");
       return;
     }
-    console.error(output || `Command failed with exit code ${result.status}.`);
+    console.error(output || `命令失败，退出码：${result.status}。`);
     printManualCommands();
     process.exit(result.status || 1);
   }
@@ -259,7 +261,7 @@ function runCodexCommand(commandArgs, options = {}) {
 
 function printManualCommands() {
   console.log(`
-Manual offline install commands:
+手动离线安装命令：
   codex plugin marketplace add ${shellQuote(marketplaceRoot)}
   codex plugin add ${pluginName}@${marketplaceName}
 `);
@@ -269,7 +271,7 @@ function readJson(filePath) {
   try {
     return JSON.parse(readFileSync(filePath, "utf-8"));
   } catch (error) {
-    fail(`Unable to read JSON from ${filePath}: ${error.message}`);
+    fail(`无法从 ${filePath} 读取 JSON：${error.message}`);
   }
 }
 

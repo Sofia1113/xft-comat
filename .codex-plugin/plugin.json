@@ -1,7 +1,7 @@
 {
   "name": "xft-comat",
   "version": "0.1.0",
-  "description": "xft-comat Workflow is a lightweight, program-driven AI coding workflow for non-trivial features, bug fixes, and refactors with routed complexity, specialist guidance, TDD, review, validation, and traceable .xft-comat records.",
+  "description": "xft-comat 工作流是轻量、程序驱动的 AI Coding 工作流，面向非平凡新功能、bug 修复和重构，提供复杂度路由、专职 agent 指导、TDD、审查、验证和可追踪的 .xft-comat 记录。",
   "author": {
     "name": "jiangshenyu",
     "email": "jiangshenyu12306@gmail.com"
@@ -19,19 +19,19 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "xft-comat",
-    "shortDescription": "Program-driven coding workflow with traceable delivery records.",
-    "longDescription": "A lightweight workflow plugin for non-trivial features, bug fixes, and refactors. It helps route work by complexity, maintain .xft-comat records, and guide TDD, review, and validation.",
+    "shortDescription": "程序驱动的 Coding 工作流，保留可追踪交付记录。",
+    "longDescription": "面向非平凡新功能、bug 修复和重构的轻量工作流插件。它按复杂度路由任务，维护 .xft-comat 记录，并指导 TDD、代码审查和验证。",
     "developerName": "jiangshenyu",
     "category": "Productivity",
     "capabilities": [
-      "Workflow",
-      "Testing",
-      "Code Review"
+      "工作流",
+      "测试",
+      "代码审查"
     ],
     "defaultPrompt": [
-      "Use xft-comat to deliver this change with traceability.",
-      "Run the xft-comat workflow for this bug fix.",
-      "Plan and validate this refactor with xft-comat."
+      "使用 xft-comat 以可追踪方式交付这个变更。",
+      "为这个 bug 修复运行 xft-comat 工作流。",
+      "用 xft-comat 规划并验证这个重构。"
     ],
     "brandColor": "#2563EB"
   }

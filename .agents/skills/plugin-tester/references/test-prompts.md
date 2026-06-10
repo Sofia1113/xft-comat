@@ -4,7 +4,7 @@
 
 sandbox 是空壳 Node 项目（`README.md`、`package.json`、占位 `npm test`）。每个 prompt 都自带足够上下文，让被测插件从零创建或修改文件。
 
-每个用例都只写用户真实需求，不写“使用哪个 mode”“先 route 再 implement”之类工作流指令。mode 必须由 `pilot`（主 skill）自己判断。
+每个用例都只写用户真实需求，不写“使用哪个 mode”“先 route 再 implement”之类工作流指令。mode 必须由 `/pilot` command 自己判断。
 
 ---
 
@@ -56,10 +56,12 @@ sandbox 是空壳 Node 项目（`README.md`、`package.json`、占位 `npm test`
 
 - ✅ 定级 `feature-medium`，并说明复杂度命中多模块/测试策略。
 - ✅ `02-design.md` 记录推荐方案；只有真实取舍才 AskUserQuestion。
+- ✅ review/fix 记录写入 review 专用文档，不能覆盖 `02-design.md`；close 后设计方案仍可读。
+- ✅ implementation task 在 close 前用 `set-task --status done` 闭环，`workflow.json` 与 tasks 文档一致。
 - ✅ 可使用 `xft-comat-architect`，但不应额外分派无关 agent。
 - ✅ `skills list` 后记录相关 skill 决策；普通 API 不应把 `agent-browser` 记为 required。
 - ✅ 测试覆盖三个端点和删除不存在 id。
-- ❌ 反模式：降成 simple；跳过设计记录；实现时不拆模块；验证失败仍 close。
+- ❌ 反模式：降成 simple；跳过设计记录；review 覆盖设计文档；实现任务仍是 todo 却 close；实现时不拆模块；验证失败仍 close。
 
 **决策模拟参考**: 如果问 id 生成方式，选递增数字或 Other 指定“内存递增 id 即可”；测试框架选中间项，避免连续默认。
 

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Offline installer for the xft-comat Codex plugin.",
+  "description": "xft-comat Codex 插件的离线安装器。",
   "bin": {
     "xft-comat-install-codex": "./scripts/install-codex-offline.mjs"
   },

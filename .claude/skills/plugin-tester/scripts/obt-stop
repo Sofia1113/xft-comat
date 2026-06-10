@@ -5,6 +5,8 @@ set -euo pipefail
 SESSION="${XFT_COMAT_TMUX_SESSION:-xft-comat-test}"
 TS=$(date +%Y%m%d-%H%M%S)
 DUMP="/tmp/xft-comat-test-${SESSION}-final-${TS}.log"
+LOG="/tmp/xft-comat-test-${SESSION}.log"
+PIPE_ARCHIVE="/tmp/xft-comat-test-${SESSION}-final-${TS}-pipe.log"
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux capture-pane -p -t "$SESSION" -S -100000 > "$DUMP" 2>/dev/null || true
@@ -13,4 +15,10 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "dump=$DUMP"
 else
   echo "no_session=$SESSION"
+fi
+
+# pipe-pane 全量日志（含 ANSI 转义）按轮归档：scrollback dump 被截头时的兜底现场。
+if [ -s "$LOG" ]; then
+  mv "$LOG" "$PIPE_ARCHIVE"
+  echo "pipe_log=$PIPE_ARCHIVE"
 fi

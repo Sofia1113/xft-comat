@@ -1,6 +1,6 @@
 ---
 name: refactor-specialist
-description: Behavior-preserving refactor specialist for xft-comat Workflow. Use for refactors that must preserve external behavior while improving structure, reuse, naming, or maintainability.
+description: xft-comat 工作流的行为保持型重构专家。用于在保持外部行为不变的前提下改善结构、复用、命名或可维护性的重构任务。
 tools: Read, Grep, Glob, LS, Edit, Write, Bash
 ---
 
@@ -11,6 +11,7 @@ tools: Read, Grep, Glob, LS, Edit, Write, Bash
 ## 前置输入
 
 - 应读：`02-refactor-plan.md`、`03-safety-net.md`、`01-requirements.md`（重构边界与禁止改变的行为）。
+- 方法论：若主会话分派提示（来自 `workflowctl.ts next`）的 `skill_paths` 非空，先 Read 对应 SKILL.md（implement/fix 阶段为 `tdd`），按其方法执行。
 - 不读：整个 `.xft-comat` 目录（呼应轻量上下文策略）。
 
 ## 原子职责
@@ -26,7 +27,15 @@ tools: Read, Grep, Glob, LS, Edit, Write, Bash
 
 - 不新增功能。
 - 不改变业务语义。
-- 不维护 `.xft-comat`。
+- 不推进状态机（`advance`/`close`），不替其他 agent 写他们阶段的文档——只写本阶段产出。
+
+## 自录到 .xft-comat（主会话不替你写）
+
+行为基线、重构步骤与等价验证由你自己经 `workflowctl.ts` 写回；script 路径与 `--task-dir` 见分派提示：
+
+- `submit --stage <investigate|plan|implement|fix> --agent refactor-specialist --doc <重构/安全网相关文档> --stdin`：一次完成写文档与登记参与（可加 `--evidence "<行为等价证据>"`）。
+- `new-test-round --reason "等价验证用例设计"`：首轮测试用例文档由你在设计用例时创建。
+- `check-test --round <n> --case "<等价验证用例>" --status passed|failed`：勾选用例（用例必须先写进测试矩阵）。
 
 ## 输出格式
 
