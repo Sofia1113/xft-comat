@@ -5,7 +5,7 @@
 
 ## 用户最终抉择
 
-<!-- XFT-TODO: feature-hard 由主会话在 decide 阶段经 record-decision 写入用户的选择、取舍和约束；架构师不要替用户填写本节，未拍板前保留本哨兵。feature-medium 若无需用户关键抉择，写明"本任务无需用户关键抉择，因为..."。 -->
+<!-- XFT-TODO: feature-hard 由主会话在 decide 阶段经 record-decision 写入用户的选择、取舍和约束；plan 阶段执行者不要替用户填写本节，未拍板前保留本哨兵。feature-medium 若无需用户关键抉择，写明"本任务无需用户关键抉择，因为..."。 -->
 
 ## 方案目标
 

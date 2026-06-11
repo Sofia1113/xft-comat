@@ -12,6 +12,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -157,9 +158,14 @@ const MODE_STAGES: Record<string, string[]> = {
 // 正文不可能合理出现、渲染不可见，误伤与绕过都比日常词（如"待补充"）少得多。
 const PLACEHOLDER_MARKERS = ["<!-- XFT-TODO"];
 
-// feature-hard 必须有结构化参与记录的专职 agent（裸 agent 名，不耦合插件作用域前缀）。
+// feature-hard 必须有结构化执行记录的阶段：证据键 = 阶段 + 执行者（worker / worker-ro / main），
+// 不再耦合具体 agent 名——同一个通用 worker 在不同阶段装载不同方法论 skill。
 // 指挥/编排职责由 pilot 主会话承担（subagent 无法再分派 subagent），不设 conductor。
-const REQUIRED_HARD_AGENTS = ["architect", "tdd-engineer", "code-reviewer"];
+const REQUIRED_HARD_STAGES = [STAGE.plan, STAGE.implement, STAGE.review];
+
+// 合法执行者：worker（读写，implement/fix）、worker-ro（只读 + Bash，探索/调查/设计/审查/验证）、
+// main（主会话兜底，仅限无 subagent 的运行时或分派失败，自录必须带 reason，不得静默顶替）。
+const EXECUTORS = ["worker", "worker-ro", "main"];
 
 const REVIEW_BEFORE_FINAL_VERIFY: Record<string, [string, string]> = {
   "feature-simple": [STAGE.review, STAGE["final-verify"]],
@@ -221,7 +227,9 @@ const ROUTING_HARD_FLOORS: [string, string][] = [
 interface StagePolicy {
   stage: string;
   purpose: string;
-  preferred_agents: string[];
+  // 本阶段的执行者变体：worker（读写）或 worker-ro（只读）；main 阶段（decide/close）留空字符串。
+  // 阶段的专业方法论不在 agent 身上，而在 STAGE_METHODOLOGY_SKILLS 指名的 skill 里。
+  executor: string;
   required_skills: string[];
   conditional_skills: string[];
   input_contract: string[];
@@ -233,7 +241,7 @@ const STAGE_POLICIES: Record<string, StagePolicy> = {
   [STAGE.investigate]: {
     stage: STAGE.investigate,
     purpose: "建立 bug 复现、根因证据，或重构行为基线。",
-    preferred_agents: ["bug-diagnostician", "refactor-specialist"],
+    executor: "worker-ro",
     required_skills: [],
     conditional_skills: ["当 UI 复现或行为基线需要浏览器时使用 agent-browser"],
     input_contract: ["01-requirements.md。", "相关代码、日志、测试或用户复现信息。"],
@@ -243,7 +251,7 @@ const STAGE_POLICIES: Record<string, StagePolicy> = {
   [STAGE.plan]: {
     stage: STAGE.plan,
     purpose: "沉淀设计、修复策略、重构方案、测试策略和任务拆分。",
-    preferred_agents: ["architect"],
+    executor: "worker-ro",
     required_skills: [],
     conditional_skills: [
       "当任务改变前端视觉设计、交互或可用性时使用 frontend-design",
@@ -258,20 +266,24 @@ const STAGE_POLICIES: Record<string, StagePolicy> = {
     output_contract: [
       "设计/修复/重构方案。",
       "测试策略。",
-      "任务拆分和 owner（add-task 登记，实现类 owner 不得是主会话）。",
+      "任务拆分（add-task 登记，owner 默认 worker，不得是主会话）：每个实现任务 = 一个测试点 + 最小实现，" +
+        "标题写明涉及文件；任务间文件范围不相交是硬约束，重叠或共享同一测试入口的任务用 --deps 串联（多个用逗号分隔）。",
+      "无依赖且文件范围不相交的任务会被并发分派给多个 worker——时长只是参考（通常几分钟），" +
+        "一个内聚单元拆碎后仍要共享上下文时，宁可保留为一个稍大的任务，不要为凑粒度切碎。",
       "feature-hard：写入 02-design.md 的待用户拍板决策点清单（留待 decide 阶段）。",
       "建议的 required/optional skill 清单（optional 项由主会话向用户确认）。",
     ],
     quality_gate: [
       "required skill 必须先 skills check。",
       "实现类任务 owner 不得是主会话。",
+      "实现任务必须满足「一个测试点 + 最小实现、文件范围互不相交」的拆分纪律；确实拆不动的大任务要在设计文档写明原因与风险。",
       "feature-hard 不得把方案写成已定稿——用户抉择由主会话在 decide 阶段经 record-decision 写回。",
     ],
   },
   [STAGE.decide]: {
     stage: STAGE.decide,
     purpose: "主会话就 02-design.md 列出的关键取舍逐个向用户拿到拍板结论。",
-    preferred_agents: [],
+    executor: "main",
     required_skills: [],
     conditional_skills: [],
     input_contract: ["02-design.md 的待决策点清单。", "01-requirements.md。"],
@@ -289,14 +301,14 @@ const STAGE_POLICIES: Record<string, StagePolicy> = {
   [STAGE.implement]: {
     stage: STAGE.implement,
     purpose: "测试先行或补齐保护后完成最小实现，并运行基础验证到可审查状态。",
-    preferred_agents: ["tdd-engineer", "refactor-specialist"],
+    executor: "worker",
     required_skills: [],
     conditional_skills: [],
     input_contract: [
       "确认需求。",
       "设计/计划。",
-      "任务列表。",
-      "当前测试用例文档（无则先用 new-test-round 创建第 1 轮；用例先经 set-doc 写入测试矩阵，再用 check-test 更新状态）。",
+      "任务列表；并发分派时还包括你领到的专属任务 ID 与文件范围（只做这一个任务）。",
+      "当前测试用例文档（无则先用 new-test-round --if-missing true 创建/复用第 1 轮；用例用 add-test-case 登记进测试矩阵，再用 check-test 更新状态）。",
     ],
     output_contract: [
       "失败测试或回归测试证据。",
@@ -306,14 +318,15 @@ const STAGE_POLICIES: Record<string, StagePolicy> = {
     quality_gate: [
       "先测试后实现。",
       "主会话不得直接编辑业务代码、测试或配置。",
-      "实现结束必须运行基础冒烟验证并记录结果；它不替代 review，也不替代 final-verify。",
+      "并发实现时只改动自己任务声明的文件范围，submit 必须加 --append true 追加自己的小节；发现任务实际远超「一个测试点 + 最小实现」时先上报拆分建议，不得自行扩范围。",
+      "实现结束必须运行基础冒烟验证并记录结果（并发时只跑与本任务最相关的最小测试命令，避免互相干扰）；它不替代 review，也不替代 final-verify。",
       "失败必须解释原因和下一步。",
     ],
   },
   [STAGE.review]: {
     stage: STAGE.review,
     purpose: "在最终验证前完成代码审查。",
-    preferred_agents: ["code-reviewer"],
+    executor: "worker-ro",
     required_skills: [],
     conditional_skills: ["当本机已安装通用 code-review skill 且对任务有帮助时使用"],
     input_contract: ["本次变更 diff。", "需求、设计和测试结果。"],
@@ -327,34 +340,34 @@ const STAGE_POLICIES: Record<string, StagePolicy> = {
     quality_gate: [
       "审查必须早于 final-verify。",
       "审查结论必须用 record-review 落库：有阻塞发现 --blocking true，无则 false（fix 阶段据此跳过）。",
-      "审查发现必须回交实现专职 agent 闭环。",
-      "不得用主会话自检替代 required 审查者。",
+      "审查发现必须回交 fix 阶段的实现 worker 闭环。",
+      "审查必须由独立分派的 worker-ro 完成，不得用主会话自检替代。",
     ],
   },
   [STAGE.fix]: {
     stage: STAGE.fix,
     purpose: "闭环审查发现，补回归测试并复跑受影响验证（review 无阻塞发现时自动跳过）。",
-    preferred_agents: ["tdd-engineer", "refactor-specialist"],
+    executor: "worker",
     required_skills: [],
     conditional_skills: [],
     input_contract: ["record-review 登记的审查结论与阻塞摘要。", "必须补回归测试列表。"],
     output_contract: ["新增/修改回归测试。", "修复说明。", "受影响验证结果。"],
-    quality_gate: ["先补回归测试再修复。", "修复 owner 应回到原实现专职 agent。"],
+    quality_gate: ["先补回归测试再修复。", "修复由实现 worker 执行，不回流主会话。"],
   },
   [STAGE["final-verify"]]: {
     stage: STAGE["final-verify"],
     purpose: "审查修复后执行最终自动化验证、E2E 回归或等价验证。",
-    preferred_agents: ["e2e-verifier"],
+    executor: "worker-ro",
     required_skills: [],
     conditional_skills: ["当涉及 UI/E2E 时使用 agent-browser"],
     input_contract: ["最新测试用例文档。", "审查和修复闭环结果。"],
     output_contract: ["最终验证命令或真实浏览器路径。", "通过/失败证据。", "check-test 更新建议。"],
-    quality_gate: ["必须发生在 review/fix 之后。", "UI/E2E 必须使用 e2e-verifier + agent-browser，或显式记录降级/阻塞。"],
+    quality_gate: ["必须发生在 review/fix 之后。", "UI/E2E 必须经 agent-browser 取得真实浏览器证据，或显式记录降级/阻塞。"],
   },
   [STAGE.close]: {
     stage: STAGE.close,
     purpose: "运行 validate/close，完成交付汇报。",
-    preferred_agents: [],
+    executor: "main",
     required_skills: [],
     conditional_skills: [],
     input_contract: ["status 或 validate 输出。", "所有阶段证据。"],
@@ -363,11 +376,14 @@ const STAGE_POLICIES: Record<string, StagePolicy> = {
   },
 };
 
-// 各阶段对应的方法论 skill（本插件 skills/ 下的 SKILL.md）。
-// agent 没有 Skill 工具，按 next 输出里的绝对路径 Read 这些 SKILL.md 作为本阶段方法论。
-// workflow-router / requirements-clarifier 由主会话（pilot）在 init 之前直接调用。
+// 各阶段对应的方法论 skill（本插件 skills/ 下的 SKILL.md）。这是阶段专业能力的唯一归属：
+// worker 没有 Skill 工具，按 next 输出里的绝对路径 Read 这些 SKILL.md 作为本阶段方法论；
+// 一个阶段可挂多个 skill，是否适用由各 SKILL.md 自身的适用条件说明（如 domain-modeling
+// 仅在业务规则复杂时使用）。workflow-router / grill-idea 由主会话（pilot）在 init 之前直接
+// 调用；explore-project 由 pilot 在 init 之前分派给 worker-ro。
 const STAGE_METHODOLOGY_SKILLS: Record<string, string[]> = {
-  [STAGE.plan]: ["domain-modeling"],
+  [STAGE.investigate]: ["investigation"],
+  [STAGE.plan]: ["solution-design", "task-splitting", "domain-modeling"],
   [STAGE.implement]: ["tdd"],
   [STAGE.fix]: ["tdd"],
   [STAGE.review]: ["code-review"],
@@ -375,7 +391,7 @@ const STAGE_METHODOLOGY_SKILLS: Record<string, string[]> = {
 };
 
 // decide/close 由主会话（pilot）直接驱动：decide 用 AskUserQuestion 拿用户拍板并
-// record-decision 落库；close 运行 validate/close 收尾。其余阶段由 next 指名的专职 agent 执行。
+// record-decision 落库；close 运行 validate/close 收尾。其余阶段由 next 指名的 worker 变体执行。
 const MAIN_DRIVEN_STAGES = new Set<string>([STAGE.decide, STAGE.close]);
 
 // skills list 不硬编码任何 skill，而是扫描本机标准 skill 安装目录，
@@ -455,8 +471,12 @@ interface TaskItem {
   evidence?: string;
 }
 
-interface AgentRecord {
-  agent: string;
+// 阶段执行记录：证据键 = 阶段 + 执行者（worker / worker-ro / main），每个阶段一条。
+// participated 必须带 evidence；skipped 必须带 reason；executor 为 main 时必须带 reason
+// （无 subagent 的运行时或 worker 分派失败的兜底必须显式留痕，不得静默顶替）。
+interface ExecutionRecord {
+  stage: string;
+  executor: string;
   decision: string;
   evidence?: string;
   reason?: string;
@@ -477,14 +497,14 @@ interface Meta {
   stages: StageItem[];
   test_rounds: number;
   tasks: TaskItem[];
-  agents: AgentRecord[];
+  executions: ExecutionRecord[];
   // 任务是否涉及 UI 流程 / 浏览器 E2E。命中路由的 ui 复杂度维度时由 init --ui true 持久化，
-  // close 门禁据此强制 E2E（e2e-verifier + agent-browser）与 frontend-design 决策不被静默降级。
+  // close 门禁据此强制 E2E（final-verify 执行记录 + agent-browser）与 frontend-design 决策不被静默降级。
   ui?: boolean;
   // review 阶段的审查结论（record-review 写入）；blocking=false 时 fix 阶段可跳过。
   review?: ReviewVerdict;
-  // 运行时标识（claude/codex）。codex 无 subagent 机制，专职 agent 可记 skipped +
-  // runtime 原因通过门禁；多 agent 深度协作的保证只在支持 subagent 的运行时成立。
+  // 运行时标识（claude/codex）。codex 无 subagent 机制，阶段可由主会话以
+  // --executor main + reason 自录通过门禁；worker 隔离执行的保证只在支持 subagent 的运行时成立。
   runtime?: string;
 }
 
@@ -594,6 +614,59 @@ function saveMeta(taskDir: string, meta: Meta): void {
   );
 }
 
+// ---- 任务目录写锁：支撑 implement/fix 阶段多 agent 并发自录 ----
+// 所有可变子命令在 main 入口处持锁执行（mkdir 原子性 + 过期窃取），
+// 避免并发 agent 同时读改写 workflow.json / 文档时丢更新。
+
+const LOCK_WAIT_MS = 15_000;
+const LOCK_STALE_MS = 60_000;
+
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function withTaskLock<T>(taskDir: string, fn: () => T): T {
+  const lockDir = path.join(taskDir, ".lock");
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      mkdirSync(lockDir);
+      break;
+    } catch {
+      if (Date.now() > deadline) {
+        fail(`获取写锁超时：${lockDir}（其他 agent 正在写入；确认无并发进程后可删除该目录重试）`);
+      }
+      try {
+        if (Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) {
+          rmSync(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        continue; // 锁刚被释放，立即重试（超时已在上方守住）
+      }
+      sleepMs(50 + Math.floor(Math.random() * 100));
+    }
+  }
+  // fail() 走 process.exit，不会执行 finally——用 exit 钩子兜底释放，避免锁泄漏。
+  let locked = true;
+  const release = (): void => {
+    if (locked) {
+      locked = false;
+      try {
+        rmSync(lockDir, { recursive: true, force: true });
+      } catch {
+        // 释放失败只能留给 LOCK_STALE_MS 过期窃取。
+      }
+    }
+  };
+  process.once("exit", release);
+  try {
+    return fn();
+  } finally {
+    release();
+  }
+}
+
 function cmdRoute(flags: Flags): void {
   // 代码不替模型做路由决策，只回显澄清后的任务并提供评判框架。
   // 模型应先完成公共的 receive/explore-and-clarify，再读取本输出判断 mode。
@@ -609,7 +682,7 @@ function cmdRoute(flags: Flags): void {
       "并把每条底线的命中/排除结论写入 00-routing.md。" +
       "最后用判断出的 mode 调用 init。bugfix 与 refactor 优先于复杂度评分。" +
       "若复杂度自评命中 ui 维度（涉及 UI 流程、状态管理、可访问性或浏览器 E2E），" +
-      "调用 init 时必须加 --ui true：收尾门禁据此强制 E2E（e2e-verifier + agent-browser）" +
+      "调用 init 时必须加 --ui true：收尾门禁据此强制 E2E（final-verify 真实执行记录 + agent-browser）" +
       "与 frontend-design 决策不被静默降级；UI 涉及面在 investigate/plan 才浮现时用 set-ui --value true 补开。",
     task_types: TASK_TYPES.map(([name, desc]) => ({ type: name, definition: desc })),
     complexity_dimensions: COMPLEXITY_DIMENSIONS.map(([name, desc]) => ({
@@ -639,8 +712,9 @@ function cmdStagePolicy(flags: Flags): void {
     stage,
     mode: mode || null,
     instructions:
-      "按本阶段 policy 选择 agent/skill、准备输入、生成输出并检查 quality_gate。pilot 命令只负责推动流程；" +
-      "阶段专业工作必须交给 policy 中的 agent 或 skill，required/conditional skill 落定后用 skills check 与 record-skill 留证据。",
+      "按本阶段 policy 准备输入、生成输出并检查 quality_gate。pilot 命令只负责推动流程；" +
+      "阶段专业工作交给 policy.executor 指名的 worker 变体，方法论来自阶段挂载的 skill，" +
+      "required/conditional skill 落定后用 skills check 与 record-skill 留证据。",
     policy,
   };
   console.log(JSON.stringify(payload, null, 2));
@@ -713,22 +787,30 @@ function cmdNext(flags: Flags): void {
     ? stage === STAGE.decide
       ? "本阶段由主会话直接处理：读取设计文档的待决策点，优先用 AskUserQuestion 逐个向用户拿到拍板结论" +
         "（每次一个决策，附推荐答案），然后用 record-decision --stdin 把抉择写入设计文档开头，再 advance。"
-      : "本阶段由主会话直接处理（运行 validate/close 收尾），不分派 agent。"
-    : "本阶段产出必须由你（被分派的 agent）自行写回 .xft-comat，主会话不替你写：" +
-      `优先用 \`node ${SCRIPT_PATH} submit --task-dir ${taskDir} --stage ${stage} --agent <你的 agent 名> --doc ${primaryDoc} --stdin\` 一次完成写文档与登记参与` +
+      : "本阶段由主会话直接处理（运行 validate/close 收尾），不分派 worker。"
+    : "本阶段产出必须由你（被分派的 worker）自行写回 .xft-comat，主会话不替你写：" +
+      `优先用 \`node ${SCRIPT_PATH} submit --task-dir ${taskDir} --stage ${stage} --executor ${policy.executor} --doc ${primaryDoc} --stdin\` 一次完成写文档与登记本阶段执行` +
       (extraDocs.length > 0 ? `（本阶段另需先用 \`set-doc\` 写 ${extraDocs.join("、")}）` : "") +
       "；--doc 只接受任务目录中已存在的注册文档（由 init/new-test-round 创建），不要自创文档名；" +
-      "submit/set-doc 会整篇覆盖目标文档，先读原文再合并改写；" +
-      "测试用例三步走：首轮先 `new-test-round` 创建本轮文档 → 用 `set-doc` 把用例登记进「测试矩阵」" +
-      "（格式 `- [ ] TC-001 — 待验证 — ...`）→ 跑完测试用 `check-test --round <n> --case <TC 编号> --status passed|failed` " +
+      "submit/set-doc 默认整篇覆盖目标文档，先读原文再合并改写；" +
+      "测试用例三步走：首轮先 `new-test-round --if-missing true` 创建/复用本轮文档 → 用 " +
+      "`add-test-case --round <n> --case <TC 编号> --desc \"类型：... — 目标：...\"` 把用例逐条登记进「测试矩阵」" +
+      "（并发安全；TC 编号全局唯一，并发批次中建议带任务序号前缀避免撞号；" +
+      "只有整篇改写测试轮文档的叙述章节才用 set-doc）→ 跑完测试用 " +
+      "`check-test --round <n> --case <TC 编号> --status passed|failed` " +
       "逐条更新状态（未登记的用例会被拒绝，不会静默新增）；" +
       ([STAGE.implement, STAGE.fix].includes(stage)
-        ? `实现/修复完成后，用 \`set-task --task-dir ${taskDir} --id <任务ID> --status done --evidence "<验证证据>"\` 标记对应实现任务；`
+        ? "多 worker 并发实现时 submit 必须加 `--append true`，把你的产出作为新小节（标题含你的任务 ID）追加，不得整篇覆盖他人记录；" +
+          `实现/修复完成后，用 \`set-task --task-dir ${taskDir} --id <任务ID> --status done --evidence "<验证证据>"\` 标记对应实现任务；`
         : "") +
       (stage === STAGE.review
         ? `审查结论必须用 \`record-review --task-dir ${taskDir} --blocking true|false [--summary "<阻塞摘要>"]\` 落库；`
         : "") +
-      `required/conditional skill 用 \`record-skill\` 留证据。`;
+      (stage === STAGE["final-verify"]
+        ? `若本阶段产出全部经 check-test 落库而未走 submit，必须另用 \`record-stage --task-dir ${taskDir} --stage ${stage} --executor ${policy.executor} --decision participated --evidence "<真实验证证据>"\` 留下执行记录；`
+        : "") +
+      "required/conditional skill 用 `record-skill` 留证据。" +
+      "advance/close 只归主会话——你完成自录后直接汇报结果，不要推进状态机。";
 
   const inputs: Record<string, unknown> = {
     summary: meta.summary,
@@ -744,6 +826,19 @@ function cmdNext(flags: Flags): void {
     inputs.review = meta.review;
   }
 
+  // implement/fix：下发未完成的实现任务清单，待办 ≥ 2 时要求 pilot 按依赖分波、
+  // 同一波内每任务并发分派一个独立 worker（拆小任务并发执行，替代单 worker 长跑）。
+  let pendingTasks: { id: string; title: string; owner: string; status: string; deps: string | null }[] = [];
+  if ([STAGE.implement, STAGE.fix].includes(stage)) {
+    pendingTasks = (meta.tasks ?? [])
+      .filter((t) => (t.kind ?? "implementation") === "implementation" && t.status !== "done")
+      .map((t) => ({ id: t.id, title: t.title, owner: t.owner, status: t.status, deps: t.deps ?? null }));
+    if (pendingTasks.length > 0) {
+      inputs.pending_tasks = pendingTasks;
+    }
+  }
+  const parallel = !isMain && pendingTasks.length >= 2;
+
   const payload = {
     done: false,
     mode: meta.mode,
@@ -751,11 +846,25 @@ function cmdNext(flags: Flags): void {
     purpose: policy.purpose,
     dispatch: {
       kind: isMain ? "main" : "agent",
-      agents: policy.preferred_agents,
+      agent: policy.executor,
       apply_skills: skillNames,
       skill_paths: skillPaths,
       required_skills: policy.required_skills,
       conditional_skills: policy.conditional_skills,
+      parallel,
+      ...(parallel
+        ? {
+            parallel_instructions:
+              "不要把整个阶段打包给一个 worker。按 inputs.pending_tasks 分波并发：" +
+              "(1) 取所有依赖均已 done（或无依赖）的任务作为一波；文件范围重叠或共享同一测试入口的任务顺延到下一波。" +
+              "(2) 同一波内每个任务分派一个独立的 worker——在同一条回复中并行发出多个 Task 调用，每个 worker 只领一个任务 ID。" +
+              "(3) 每个分派提示必须写明：script_path 与 task_dir（worker 自己跑 next 取本阶段完整分派包）、" +
+              "该 worker 专属的任务 ID/标题/文件范围、只动该范围、submit 加 --append true 追加小节、" +
+              "完成后 set-task --id <任务ID> --status done --evidence 标记。" +
+              "(4) 首轮测试文档统一用 new-test-round --if-missing true 创建/复用，用例用 add-test-case 登记。" +
+              "(5) 一波全部 set-task done 后再发下一波；所有实现任务 done 后才 advance。",
+          }
+        : {}),
     },
     inputs,
     outputs_expected: policy.output_contract,
@@ -898,7 +1007,7 @@ function cmdInit(flags: Flags): void {
     stages: stages.map((stage) => ({ name: stage, status: "pending" })),
     test_rounds: 1,
     tasks: [],
-    agents: [],
+    executions: [],
     ui,
   };
   if (runtime) {
@@ -1074,24 +1183,30 @@ function readSkillRecords(taskDir: string): ParsedSkillRecord[] {
 }
 
 // 仪式最小化：不再做"证据："字符串检查（只能验证一句话存在，验证不了真实性，
-// 徒增书写负担）；保留机器可核验的结构化检查——record-agent 写入时已强制
-// participated 带 evidence、skipped 带 reason，此处只核对 hard 的覆盖面。
+// 徒增书写负担）；保留机器可核验的结构化检查——submit / record-stage 写入时已强制
+// participated 带 evidence、skipped 带 reason、main 带 reason，此处只核对 hard 的覆盖面。
 function validateRequiredParticipation(taskDir: string, meta: Meta, errors: string[]): void {
   if (!findSkillDoc(taskDir)) {
     errors.push("找不到 skill 使用记录文件");
     return;
   }
   if (meta.mode === "feature-hard") {
-    // 从结构化 record-agent 记录判断，而非字符串包含 agent 名（避免“写了名字但标注未参与”蒙混）。
-    const byAgent = new Map((meta.agents ?? []).map((rec) => [rec.agent, rec]));
-    for (const name of REQUIRED_HARD_AGENTS) {
-      const rec = byAgent.get(name);
+    // 证据键 = 阶段 + 执行者：从结构化执行记录判断，而非字符串包含（避免"写了名字但未真正执行"蒙混）。
+    const byStage = new Map((meta.executions ?? []).map((rec) => [rec.stage, rec]));
+    for (const stageName of REQUIRED_HARD_STAGES) {
+      const rec = byStage.get(stageName);
       if (!rec) {
-        errors.push(`feature-hard 必须用 record-agent 记录专职 agent 参与或跳过原因：缺 ${name}`);
+        errors.push(
+          `feature-hard 必须有 ${stageName} 阶段的结构化执行记录（worker 经 submit 自录，或 record-stage 登记）：缺 ${stageName}`,
+        );
       } else if (rec.decision === "participated" && !rec.evidence) {
-        errors.push(`${name} 记录为 participated 但缺少实质参与证据`);
+        errors.push(`${stageName} 阶段记录为 participated 但缺少实质执行证据`);
       } else if (rec.decision === "skipped" && !rec.reason) {
-        errors.push(`${name} 记录为 skipped 但缺少未使用原因`);
+        errors.push(`${stageName} 阶段记录为 skipped 但缺少原因`);
+      } else if (rec.executor === "main" && !rec.reason) {
+        errors.push(
+          `${stageName} 阶段由主会话执行（executor=main）但缺少原因——main 兜底必须显式留痕（如运行时无 subagent 或 worker 分派失败）`,
+        );
       }
     }
   }
@@ -1131,18 +1246,18 @@ function validateUiCoverage(taskDir: string, meta: Meta, errors: string[]): void
     return;
   }
   const skillRecs = readSkillRecords(taskDir);
-  const byAgent = new Map((meta.agents ?? []).map((rec) => [rec.agent, rec]));
 
-  // E2E 门：要么 e2e-verifier 实际参与并带证据，要么 agent-browser 被显式记录为降级/阻塞（带原因）。
-  const e2e = byAgent.get("e2e-verifier");
+  // E2E 门：要么 final-verify 阶段有带证据的真实执行记录，要么 agent-browser 被显式记录为降级/阻塞（带原因）。
+  const e2e = (meta.executions ?? []).find((rec) => rec.stage === STAGE["final-verify"]);
   const e2eDone = !!(e2e && e2e.decision === "participated" && e2e.evidence);
   const browserDowngraded = skillRecs.some(
     (r) => r.skill === "agent-browser" && (r.decision === "downgraded" || r.decision === "blocked"),
   );
   if (!e2eDone && !browserDowngraded) {
     errors.push(
-      "UI 任务必须由 e2e-verifier + agent-browser 完成 E2E（record-agent --agent e2e-verifier " +
-        "--decision participated 带证据），或在 agent-browser 不可用时显式记录降级" +
+      "UI 任务必须有 final-verify 阶段的真实执行记录（worker 经 submit 自录，或 " +
+        "record-stage --stage final-verify --decision participated 带证据），E2E 须经 agent-browser " +
+        "取得真实浏览器证据；agent-browser 不可用时显式记录降级" +
         "（record-skill --skill agent-browser --decision downgraded/blocked --reason …）；" +
         "不得由主会话静默用单元测试或 build 顶替 E2E。",
     );
@@ -1237,7 +1352,7 @@ function validateTaskOwnership(meta: Meta, errors: string[]): void {
     if (kind === "implementation" && isMainSessionOwner(task.owner)) {
       errors.push(
         `${task.id} 是实现类任务，owner 不得为主会话（当前：${task.owner}）；` +
-          `实现/测试/前端落地/审查修复必须分派给专职 agent。`,
+          `实现/测试/前端落地/审查修复必须分派给 worker 执行。`,
       );
     }
   }
@@ -1382,13 +1497,21 @@ function cmdSetDoc(flags: Flags): void {
   console.log(target);
 }
 
-// submit = set-doc + record-agent participated，一次调用完成本阶段产出落库与参与登记，
-// 把 agent 的仪式性调用压到最少。
+// submit = set-doc + 阶段执行记录（participated）合一，一次调用完成本阶段产出落库与执行登记，
+// 把 worker 的仪式性调用压到最少。--append true 时把内容作为新小节追加（不整篇覆盖），
+// 供 implement/fix 阶段多个并发 worker 各自追加自己任务的实现记录。
 function cmdSubmit(flags: Flags): void {
   const taskDir = reqStr(flags, "task-dir");
   const stage = reqChoice(flags, "stage", Object.keys(STAGE_POLICIES));
-  const agent = reqStr(flags, "agent");
+  const executor = reqChoice(flags, "executor", EXECUTORS);
+  const reason = flags.reason === undefined ? "" : String(flags.reason);
+  if (executor === "main" && !reason) {
+    fail(
+      "submit --executor main 必须提供 --reason（主会话兜底必须显式留痕：运行时无 subagent 或 worker 分派失败）",
+    );
+  }
   const doc = reqStr(flags, "doc");
+  const append = optBool(flags, "append");
   const target = path.join(taskDir, doc);
   if (!existsSync(target)) {
     fail(`目标文档不存在或不属于当前工作流：${target}。${knownDocsHint(taskDir)}`);
@@ -1402,20 +1525,37 @@ function cmdSubmit(flags: Flags): void {
         "如需维护测试矩阵或多文档阶段的前置文档，请使用 set-doc。",
     );
   }
-  writeFileSync(target, readContentArg(flags), "utf-8");
-  meta.agents = meta.agents ?? [];
+  if (append) {
+    const prev = readFileSync(target, "utf-8").replace(/\s+$/, "");
+    const body = readContentArg(flags).replace(/^\s+/, "").replace(/\s+$/, "");
+    if (!body) {
+      fail("submit --append 内容为空");
+    }
+    writeFileSync(target, `${prev}\n\n${body}\n`, "utf-8");
+  } else {
+    writeFileSync(target, readContentArg(flags), "utf-8");
+  }
+  meta.executions = meta.executions ?? [];
   const evidence =
     flags.evidence === undefined ? `${stage} 阶段产出 ${doc}` : String(flags.evidence);
-  const record: AgentRecord = { agent, decision: "participated", evidence };
-  const idx = meta.agents.findIndex((rec) => rec.agent === agent);
+  const record: ExecutionRecord = { stage, executor, decision: "participated", evidence };
+  if (reason) {
+    record.reason = reason;
+  }
+  const idx = meta.executions.findIndex((rec) => rec.stage === stage);
   if (idx >= 0) {
-    meta.agents[idx] = record;
+    // 并发多任务下同一阶段多次 submit：追加模式合并证据，避免后完成者抹掉先完成者。
+    const prevEvidence = meta.executions[idx].evidence;
+    if (append && prevEvidence && prevEvidence !== evidence) {
+      record.evidence = `${prevEvidence}；${evidence}`;
+    }
+    meta.executions[idx] = record;
   } else {
-    meta.agents.push(record);
+    meta.executions.push(record);
   }
   saveMeta(taskDir, meta);
-  rewriteAgentSection(taskDir, meta);
-  console.log(pyJSON({ stage, agent, doc }));
+  rewriteExecutionSection(taskDir, meta);
+  console.log(pyJSON({ stage, executor, doc, append }));
 }
 
 // 主会话在 decide 阶段把用户拍板结论写入设计文档的「用户最终抉择」节（文档前部）。
@@ -1659,8 +1799,8 @@ function cmdSkillsCheck(flags: Flags): void {
       parts.push(`以下 required skill 未安装：${missing.join("、")}。`);
     }
     parts.push(
-      "不可用的 required skill：不得由主会话静默顶替其职责。请在 skill-usage 记录为阻塞，" +
-        "改派能承担该职责的专职 agent，或与用户确认降级方案后再继续。",
+      "不可用的 required skill：不得由主会话静默顶替其职责。请在 skill-usage 记录为阻塞（record-skill " +
+        "--decision blocked/downgraded），或与用户确认降级方案后再继续。",
     );
     instructions = parts.join("");
   }
@@ -1734,70 +1874,82 @@ function cmdRecordSkill(flags: Flags): void {
   console.log(p);
 }
 
-// ---- 结构化专职 agent 参与记录（meta.agents 为真源，渲染到 skill-usage 的 Agent 区）----
+// ---- 结构化阶段执行记录（meta.executions 为真源，渲染到 skill-usage 的执行记录区）----
 
-const AGENT_DECISIONS = ["participated", "skipped"];
-const AGENT_SECTION_HEADING = "## Agent 参与记录";
+const EXECUTION_DECISIONS = ["participated", "skipped"];
+const EXECUTION_SECTION_HEADING = "## 阶段执行记录";
 
-function renderAgentLine(rec: AgentRecord): string {
-  const tail =
-    rec.decision === "participated" ? ` — 证据：${rec.evidence ?? ""}` : ` — 原因：${rec.reason ?? ""}`;
-  return `- \`${rec.agent}\` — ${rec.decision}${tail}`;
+function renderExecutionLine(rec: ExecutionRecord): string {
+  const parts = [`- \`${rec.stage}\` — ${rec.executor} — ${rec.decision}`];
+  if (rec.decision === "participated") {
+    parts.push(`证据：${rec.evidence ?? ""}`);
+  }
+  if (rec.reason) {
+    parts.push(`原因：${rec.reason}`);
+  }
+  return parts.join(" — ");
 }
 
-// 用 meta.agents 整体重渲染 skill-usage 的「Agent 参与记录」区（替换该区，不碰其它区）。
-function rewriteAgentSection(taskDir: string, meta: Meta): void {
+// 用 meta.executions 整体重渲染 skill-usage 的「阶段执行记录」区（替换该区，不碰其它区）。
+function rewriteExecutionSection(taskDir: string, meta: Meta): void {
   const skillDoc = findSkillDoc(taskDir);
   if (!skillDoc) {
     return;
   }
   const p = path.join(taskDir, skillDoc);
   let content = readFileSync(p, "utf-8");
-  const headingAt = content.indexOf(AGENT_SECTION_HEADING);
+  const headingAt = content.indexOf(EXECUTION_SECTION_HEADING);
   if (headingAt === -1) {
     return;
   }
-  const nextHeading = content.indexOf("\n## ", headingAt + AGENT_SECTION_HEADING.length);
+  const nextHeading = content.indexOf("\n## ", headingAt + EXECUTION_SECTION_HEADING.length);
   const sectionEnd = nextHeading === -1 ? content.length : nextHeading;
-  const records = meta.agents ?? [];
+  const records = meta.executions ?? [];
   const body = records.length
-    ? records.map(renderAgentLine).join("\n")
-    : "暂无 agent 参与记录，使用 record-agent 登记。";
-  const newSection = `${AGENT_SECTION_HEADING}\n\n${body}\n`;
+    ? records.map(renderExecutionLine).join("\n")
+    : "暂无阶段执行记录，由 submit / record-stage 登记。";
+  const newSection = `${EXECUTION_SECTION_HEADING}\n\n${body}\n`;
   content = content.slice(0, headingAt) + newSection + content.slice(sectionEnd);
   writeFileSync(p, content, "utf-8");
 }
 
-function cmdRecordAgent(flags: Flags): void {
+// record-stage：不经 submit 落库文档时的阶段执行登记入口（如 final-verify 全走 check-test、
+// 阶段被人工跳过、主会话兜底）。键 = 阶段；participated 必带 evidence，skipped 必带 reason，
+// executor=main 必带 reason。
+function cmdRecordStage(flags: Flags): void {
   const taskDir = reqStr(flags, "task-dir");
-  const agent = reqStr(flags, "agent");
-  const decision = reqChoice(flags, "decision", AGENT_DECISIONS);
+  const stage = reqChoice(flags, "stage", Object.keys(STAGE_POLICIES));
+  const executor = reqChoice(flags, "executor", EXECUTORS);
+  const decision = reqChoice(flags, "decision", EXECUTION_DECISIONS);
   const evidence = flags.evidence === undefined ? "" : String(flags.evidence);
   const reason = flags.reason === undefined ? "" : String(flags.reason);
   if (decision === "participated" && !evidence) {
-    fail("record-agent participated 必须提供 --evidence（实质参与证据）");
+    fail("record-stage participated 必须提供 --evidence（实质执行证据）");
   }
   if (decision === "skipped" && !reason) {
-    fail("record-agent skipped 必须提供 --reason（未使用原因）");
+    fail("record-stage skipped 必须提供 --reason（跳过原因）");
+  }
+  if (executor === "main" && !reason) {
+    fail("record-stage --executor main 必须提供 --reason（主会话兜底必须显式留痕）");
   }
   const meta = loadMeta(taskDir);
-  meta.agents = meta.agents ?? [];
-  const record: AgentRecord = { agent, decision };
+  meta.executions = meta.executions ?? [];
+  const record: ExecutionRecord = { stage, executor, decision };
   if (evidence) {
     record.evidence = evidence;
   }
   if (reason) {
     record.reason = reason;
   }
-  const idx = meta.agents.findIndex((rec) => rec.agent === agent);
+  const idx = meta.executions.findIndex((rec) => rec.stage === stage);
   if (idx >= 0) {
-    meta.agents[idx] = record;
+    meta.executions[idx] = record;
   } else {
-    meta.agents.push(record);
+    meta.executions.push(record);
   }
   saveMeta(taskDir, meta);
-  rewriteAgentSection(taskDir, meta);
-  console.log(pyJSON({ agent, decision }));
+  rewriteExecutionSection(taskDir, meta);
+  console.log(pyJSON({ stage, executor, decision }));
 }
 
 // 修正任务是否涉及 UI 的标志。常用于 init 时未命中、但在 investigate/plan 才发现需要 UI/E2E 时
@@ -1837,10 +1989,16 @@ function nextTestDoc(taskDir: string, meta: Meta, roundNumber: number): string {
 function cmdNewTestRound(flags: Flags): void {
   const taskDir = reqStr(flags, "task-dir");
   const reason = reqStr(flags, "reason");
+  const ifMissing = optBool(flags, "if-missing");
   const meta = loadMeta(taskDir);
   // 首轮：init 不再预生成测试用例文档，由实现/验证 agent 设计用例时创建 round-1；
-  // 此后每次调用都开新一轮。
+  // 此后每次调用都开新一轮。--if-missing true 时已有轮次直接复用最新一轮
+  // （写锁保证并发实现 agent 同时调用时只有第一个会真正建轮）。
   const isFirstRound = testRoundDocs(taskDir).length === 0;
+  if (!isFirstRound && ifMissing) {
+    console.log(nextTestDoc(taskDir, meta, Number(meta.test_rounds ?? 1)));
+    return;
+  }
   if (!isFirstRound) {
     meta.test_rounds = Number(meta.test_rounds ?? 1) + 1;
     saveMeta(taskDir, meta);
@@ -1894,6 +2052,44 @@ function cmdCheckTest(flags: Flags): void {
     );
   }
   writeFileSync(p, newContent, "utf-8");
+  console.log(p);
+}
+
+// add-test-case：把单条用例追加进指定轮次的「测试矩阵」，生成行与 check-test 的
+// 匹配格式一致。逐条追加 + 写锁，使并发实现 agent 登记用例不会像 set-doc 整篇
+// 覆盖那样互相抹掉。
+function cmdAddTestCase(flags: Flags): void {
+  const taskDir = reqStr(flags, "task-dir");
+  const round = reqInt(flags, "round");
+  const caseName = reqStr(flags, "case");
+  const desc = reqStr(flags, "desc").replace(/\s*\n\s*/g, " ").trim();
+  if (!desc) {
+    fail("参数 --desc 不能为空（建议格式：类型：unit/integration/e2e/regression — 目标：<一句话>）");
+  }
+  const meta = loadMeta(taskDir);
+  const p = nextTestDoc(taskDir, meta, round);
+  if (!existsSync(p)) {
+    fail(`测试轮次不存在：${p}（先用 new-test-round 创建）`);
+  }
+  const content = readFileSync(p, "utf-8");
+  // 查重只看可见正文：模板的 XFT-TODO 注释里有 TC-001 示例行，不能误判为已登记。
+  if (new RegExp(`- \\[[ x]\\] ${escapeRegExp(caseName)} `).test(content.replace(/<!--[\s\S]*?-->/g, ""))) {
+    fail(`测试用例已存在：${caseName}（用 check-test 更新状态）`);
+  }
+  const heading = "## 测试矩阵";
+  const at = content.indexOf(heading);
+  if (at === -1) {
+    fail(`找不到「${heading}」章节：${p}`);
+  }
+  const line = `- [ ] ${caseName} — 待验证 — ${desc}`;
+  const sectionStart = at + heading.length;
+  const nextHeading = content.indexOf("\n## ", sectionStart);
+  const sectionEnd = nextHeading === -1 ? content.length : nextHeading;
+  // 首条用例落地时移除本节模板注释：示例行会被 check-test 的全文匹配误改，留着有害。
+  const section = content.slice(sectionStart, sectionEnd).replace(/<!--[\s\S]*?-->\n?/g, "");
+  const before = (content.slice(0, sectionStart) + section).replace(/\s+$/, "");
+  const after = nextHeading === -1 ? "" : content.slice(sectionEnd);
+  writeFileSync(p, `${before}\n${line}\n${after}`, "utf-8");
   console.log(p);
 }
 
@@ -1981,7 +2177,8 @@ function rewriteTasks(taskDir: string, meta: Meta): void {
 function cmdAddTask(flags: Flags): void {
   const taskDir = reqStr(flags, "task-dir");
   const title = reqStr(flags, "title");
-  const owner = reqStr(flags, "owner");
+  // 实现任务的执行者就是通用 worker，owner 缺省即为 worker；coordination 类可显式标主会话。
+  const owner = flags.owner === undefined ? "worker" : reqStr(flags, "owner");
   const kind = flags.kind === undefined ? "implementation" : reqChoice(flags, "kind", TASK_KINDS);
   const status = flags.status === undefined ? "todo" : reqChoice(flags, "status", TASK_STATUSES);
   const meta = loadMeta(taskDir);
@@ -2139,21 +2336,59 @@ const HELP = `维护 .xft-comat 的轻量程序入口
   status --task-dir <dir>
   close --task-dir <dir>
   set-doc --task-dir <dir> --doc <doc> (--from-file <file> | --content <text> | --stdin)
-  submit --task-dir <dir> --stage <stage> --agent <agent> --doc <doc> (--from-file <file> | --content <text> | --stdin) [--evidence <text>]
+  submit --task-dir <dir> --stage <stage> --executor <worker|worker-ro|main> --doc <doc> (--from-file <file> | --content <text> | --stdin) [--evidence <text>] [--append true|false] [--reason <text>]
   record-decision --task-dir <dir> (--from-file <file> | --content <text> | --stdin)
   record-review --task-dir <dir> --blocking <true|false> [--summary <text>]
   skills list
   skills check --require <name>[,<name>...]
   record-skill --task-dir <dir> --skill <skill> --decision <accepted|declined|required|skipped|downgraded|blocked> --reason <reason> [--evidence <text>]
-  record-agent --task-dir <dir> --agent <agent> --decision <participated|skipped> [--evidence <text>] [--reason <text>]
-  add-task --task-dir <dir> --title <title> --owner <owner> [--id <id>] [--kind implementation|coordination] [--status todo|doing|done|blocked] [--deps <text>] [--evidence <text>]
+  record-stage --task-dir <dir> --stage <stage> --executor <worker|worker-ro|main> --decision <participated|skipped> [--evidence <text>] [--reason <text>]
+  add-task --task-dir <dir> --title <title> [--owner <owner>（默认 worker）] [--id <id>] [--kind implementation|coordination] [--status todo|doing|done|blocked] [--deps <text>] [--evidence <text>]
   set-task --task-dir <dir> --id <id> [--title <text>] [--owner <text>] [--kind <kind>] [--status <status>] [--deps <text>] [--evidence <text>]
-  new-test-round --task-dir <dir> --reason <reason>
+  new-test-round --task-dir <dir> --reason <reason> [--if-missing true|false]
+  add-test-case --task-dir <dir> --round <n> --case <case> --desc <text>
   check-test --task-dir <dir> --round <n> --case <case> --status <passed|failed> [--note <text>]
+
+说明：写类子命令对任务目录加写锁（.lock），供 implement/fix 阶段多个 worker 并发自录。
 `;
 
 function showHelp(): void {
   console.log(HELP);
+}
+
+// 改写 .xft-comat 状态的子命令集合：统一持任务目录写锁执行，
+// 支撑 implement/fix 阶段多个 worker 并发自录（submit/set-task/check-test 等）。
+const MUTATING_COMMANDS = new Set([
+  "advance",
+  "close",
+  "set-doc",
+  "submit",
+  "record-decision",
+  "record-review",
+  "record-skill",
+  "record-stage",
+  "set-ui",
+  "add-task",
+  "set-task",
+  "new-test-round",
+  "add-test-case",
+  "check-test",
+]);
+
+// 从原始参数中提取 --<name> 的值（兼容 --name value / --name=value），
+// 仅用于在 parseFlags 之前定位写锁目录。
+function rawFlagValue(rest: string[], name: string): string | null {
+  const flag = `--${name}`;
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === flag) {
+      const value = rest[i + 1];
+      return value === undefined || value.startsWith("--") ? null : value;
+    }
+    if (rest[i].startsWith(`${flag}=`)) {
+      return rest[i].slice(flag.length + 1);
+    }
+  }
+  return null;
 }
 
 function main(): void {
@@ -2168,6 +2403,15 @@ function main(): void {
     showHelp();
     return;
   }
+  const lockTarget = MUTATING_COMMANDS.has(command) ? rawFlagValue(rest, "task-dir") : null;
+  if (lockTarget && existsSync(lockTarget)) {
+    withTaskLock(lockTarget, () => dispatch(command, rest));
+  } else {
+    dispatch(command, rest);
+  }
+}
+
+function dispatch(command: string, rest: string[]): void {
   switch (command) {
     case "route":
       cmdRoute(parseFlags(rest, { allowedKeys: ["task"] }));
@@ -2202,7 +2446,7 @@ function main(): void {
     case "submit":
       cmdSubmit(parseFlags(rest, {
         booleanKeys: ["stdin"],
-        allowedKeys: ["task-dir", "stage", "agent", "doc", "from-file", "content", "stdin", "evidence"],
+        allowedKeys: ["task-dir", "stage", "executor", "doc", "from-file", "content", "stdin", "evidence", "append", "reason"],
       }));
       break;
     case "record-decision":
@@ -2233,9 +2477,9 @@ function main(): void {
         allowedKeys: ["task-dir", "skill", "decision", "reason", "evidence"],
       }));
       break;
-    case "record-agent":
-      cmdRecordAgent(parseFlags(rest, {
-        allowedKeys: ["task-dir", "agent", "decision", "evidence", "reason"],
+    case "record-stage":
+      cmdRecordStage(parseFlags(rest, {
+        allowedKeys: ["task-dir", "stage", "executor", "decision", "evidence", "reason"],
       }));
       break;
     case "set-ui":
@@ -2252,7 +2496,12 @@ function main(): void {
       }));
       break;
     case "new-test-round":
-      cmdNewTestRound(parseFlags(rest, { allowedKeys: ["task-dir", "reason"] }));
+      cmdNewTestRound(parseFlags(rest, { allowedKeys: ["task-dir", "reason", "if-missing"] }));
+      break;
+    case "add-test-case":
+      cmdAddTestCase(parseFlags(rest, {
+        allowedKeys: ["task-dir", "round", "case", "desc"],
+      }));
       break;
     case "check-test":
       cmdCheckTest(parseFlags(rest, {

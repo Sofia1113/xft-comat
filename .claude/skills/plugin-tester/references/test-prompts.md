@@ -33,7 +33,7 @@ sandbox 是空壳 Node 项目（`README.md`、`package.json`、占位 `npm test`
 - ✅ route 后模型自评为 `feature-simple`，不是由脚本自动判断。
 - ✅ 不因边界用例较多误升为 `feature-medium` / `feature-hard`。
 - ✅ 创建轻量 `01-requirements.md`、`02-design-note.md`、测试用例和任务记录。
-- ✅ 通常不分派 specialist；如果分派，应能说明独立价值。
+- ✅ implement 由 `worker` 装载 tdd skill 完成（feature-simple 没有 plan 阶段，不应出现设计 worker 长跑）。
 - ✅ 先补测试，再实现，再跑测试。
 - ✅ 测试至少覆盖字符串输入、数组输入、去重顺序、`allowDuplicates`、`maxTags`、空值/非字符串忽略。
 - ❌ 反模式：升成 `feature-hard`；为单模块任务做复杂多 agent 编排；跳过测试；只测示例不测选项和边界。
@@ -58,7 +58,7 @@ sandbox 是空壳 Node 项目（`README.md`、`package.json`、占位 `npm test`
 - ✅ `02-design.md` 记录推荐方案；只有真实取舍才 AskUserQuestion。
 - ✅ review/fix 记录写入 review 专用文档，不能覆盖 `02-design.md`；close 后设计方案仍可读。
 - ✅ implementation task 在 close 前用 `set-task --status done` 闭环，`workflow.json` 与 tasks 文档一致。
-- ✅ 可使用 `xft-comat-architect`，但不应额外分派无关 agent。
+- ✅ plan 分派 `worker-ro`（装载 solution-design / task-splitting），implement 分派 `worker`（装载 tdd）；不应出现 worker/worker-ro 之外的 agent 名。
 - ✅ `skills list` 后记录相关 skill 决策；普通 API 不应把 `agent-browser` 记为 required。
 - ✅ 测试覆盖三个端点和删除不存在 id。
 - ❌ 反模式：降成 simple；跳过设计记录；review 覆盖设计文档；实现任务仍是 todo 却 close；实现时不拆模块；验证失败仍 close。
@@ -80,8 +80,8 @@ sandbox 是空壳 Node 项目（`README.md`、`package.json`、占位 `npm test`
 **关键观察点**：
 
 - ✅ 定级 `feature-hard`，命中安全/多模块/架构取舍/测试策略。
-- ✅ 逐轮澄清关键问题，不一次问一长串。
-- ✅ 使用 `xft-comat-architect` 或等价 architect 方案，并在 `02-design.md` 开头记录用户最终抉择。
+- ✅ grill 式想法澄清：一次只问一个问题、附推荐答案、按依赖顺序追问，不一次问一长串。
+- ✅ plan 由独立分派的 `worker-ro` 装载 solution-design 产出方案与决策点，并在 `02-design.md` 开头记录用户最终抉择（decide 阶段经 record-decision 写入）。
 - ✅ 密码哈希存储，不明文；token 策略和错误处理有说明。
 - ✅ 测试覆盖注册、登录、鉴权成功和鉴权失败。
 - ❌ 反模式：降成 medium/simple；跳过用户关键抉择；密码明文；没有严格验证。

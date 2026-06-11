@@ -9,11 +9,11 @@
 
 暂无候选 skill 记录。
 
-## Agent 参与记录
+## 阶段执行记录
 
-<!-- 本节由 record-agent / submit 命令程序维护并整体渲染，不要手改本节。每个专职 agent 记一条 participated（带实质参与证据）或 skipped（带未使用原因）。feature-hard 必须覆盖 architect、tdd-engineer、code-reviewer，涉及 UI/E2E 时还须覆盖 e2e-verifier。指挥/编排由 pilot 主会话承担，无需登记。 -->
+<!-- 本节由 submit / record-stage 命令程序维护并整体渲染，不要手改本节。每个实质阶段记一条：阶段 — 执行者（worker/worker-ro/main）— participated（带实质执行证据）或 skipped（带原因）；executor 为 main 的兜底记录必须带原因。feature-hard 必须覆盖 plan、implement、review 三个阶段，涉及 UI/E2E 时 final-verify 还须有带证据的执行记录。指挥/编排由 pilot 主会话承担，无需登记。 -->
 
-暂无 agent 参与记录，使用 record-agent 登记。
+暂无阶段执行记录，由 submit / record-stage 登记。
 
 ## 固定规则
 
