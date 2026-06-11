@@ -26,6 +26,24 @@ if [ ! -f "$PLUGIN/.claude-plugin/plugin.json" ]; then
   exit 1
 fi
 
+# ── 启动环境前缀：隔离 + 清除客户端模型别名 ────────────────────────────
+# 默认用 CLAUDE_CONFIG_DIR 指向 sandbox 的 .claude-test-home，让被测会话脱离
+# 用户全局 ~/.claude（第三方插件 Stop hook / 全局 model / 自定义 statusLine）。
+# 同时清除会覆盖 --model 的客户端别名 env；保留 ANTHROPIC_BASE_URL/AUTH_TOKEN
+# 这类网关连接变量——模型若在服务端被钉死，由后面的模型核验兜底，不在此消灭。
+# XFT_COMAT_NO_ISOLATION=1 可关闭隔离（仍做模型核验），用于隔离 home 引发登录/信任问题时。
+TEST_HOME="$SANDBOX/.claude-test-home"
+ENV_PREFIX="env -u ANTHROPIC_MODEL -u ANTHROPIC_DEFAULT_SONNET_MODEL -u ANTHROPIC_DEFAULT_HAIKU_MODEL -u ANTHROPIC_DEFAULT_OPUS_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL"
+ISOLATION="off"
+if [ "${XFT_COMAT_NO_ISOLATION:-0}" != "1" ]; then
+  if [ -f "$TEST_HOME/settings.json" ]; then
+    ENV_PREFIX="$ENV_PREFIX CLAUDE_CONFIG_DIR='$TEST_HOME'"
+    ISOLATION="on"
+  else
+    echo "WARN: 隔离 home 缺失（$TEST_HOME），先跑 obt-init；本轮回退为非隔离启动" >&2
+  fi
+fi
+
 # 已有同名 session → 强 kill（同一时刻只允许一个测试会话，避免状态混淆）。
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
@@ -44,7 +62,7 @@ tmux set-option -g history-limit 100000
 
 # pipe-pane 把 tmux 全部输出落到 LOG，供后续 obt-snap / Monitor 读。
 tmux new-session -d -s "$SESSION" -x 220 -y 50 -c "$SANDBOX" \
-  "claude --plugin-dir '$PLUGIN' --model '$MODEL' --dangerously-skip-permissions --permission-mode bypassPermissions"
+  "$ENV_PREFIX claude --plugin-dir '$PLUGIN' --model '$MODEL' --dangerously-skip-permissions --permission-mode bypassPermissions"
 tmux kill-session -t "${SESSION}-bootstrap" 2>/dev/null || true
 tmux pipe-pane -t "$SESSION" -o "cat >> '$LOG'"
 
@@ -62,6 +80,51 @@ if [ "$READY" -ne 1 ]; then
 fi
 sleep 0.8
 
+# ── 模型核验（拒启闸门）────────────────────────────────────────────
+# 隔离 home 的 statusLine 只输出 [MODEL:<actual>]。在发 prompt 前解析真实模型，
+# 与请求的 XFT_COMAT_MODEL 比对。本机已排查无 managed-settings/env 钉死，模型
+# 若被改写多半在账号或网关服务端——隔离压不住，只有这道核验能拦住“以为在测
+# sonnet 实际跑 deepseek”的污染。
+ACTUAL_MODEL="unknown"
+for i in $(seq 1 50); do
+  LINE=$(tmux capture-pane -p -t "$SESSION" -S -50 2>/dev/null | grep -oE '\[MODEL:[^]]*\]' | tail -1 || true)
+  if [ -n "$LINE" ]; then
+    ACTUAL_MODEL="${LINE#\[MODEL:}"; ACTUAL_MODEL="${ACTUAL_MODEL%\]}"
+    break
+  fi
+  sleep 0.2
+done
+
+MODEL_CHECK="OK"
+exp=$(printf '%s' "$MODEL" | tr '[:upper:]' '[:lower:]')
+act=$(printf '%s' "$ACTUAL_MODEL" | tr '[:upper:]' '[:lower:]')
+if [ "$act" = "unknown" ]; then
+  MODEL_CHECK="UNKNOWN"
+  echo "WARN: 未能从 statusLine 解析模型（actual_model=unknown）。隔离开启时这通常意味着 TUI 未就绪或 statusLine 异常；隔离关闭时可能是全局 statusLine 不输出 [MODEL:]。无法核验，请人工确认。" >&2
+elif [ "${act#*"$exp"}" != "$act" ] || [ "${exp#*"$act"}" != "$exp" ]; then
+  MODEL_CHECK="OK"
+else
+  MODEL_CHECK="MISMATCH"
+fi
+
+if [ "$MODEL_CHECK" = "MISMATCH" ]; then
+  if [ "${XFT_COMAT_ALLOW_MODEL_MISMATCH:-0}" = "1" ]; then
+    MODEL_CHECK="MISMATCH_ALLOWED"
+    echo "WARN: 模型不符但 XFT_COMAT_ALLOW_MODEL_MISMATCH=1 放行：requested=$MODEL actual=$ACTUAL_MODEL。报告必须如实标注 actual_model=$ACTUAL_MODEL。" >&2
+  else
+    echo "ERROR: 模型核验失败 requested=$MODEL actual=$ACTUAL_MODEL（isolation=$ISOLATION）。" >&2
+    echo "ERROR: 拒绝启动以免污染测试结论。若该环境只能服务此模型，请显式 XFT_COMAT_MODEL=$ACTUAL_MODEL 重跑（报告将如实标注），" >&2
+    echo "ERROR: 或确知不符仍要继续时设 XFT_COMAT_ALLOW_MODEL_MISMATCH=1。" >&2
+    tmux kill-session -t "$SESSION" 2>/dev/null || true
+    echo "session=$SESSION"
+    echo "requested_model=$MODEL"
+    echo "actual_model=$ACTUAL_MODEL"
+    echo "model_check=MISMATCH"
+    echo "isolation=$ISOLATION"
+    exit 1
+  fi
+fi
+
 # 发送 prompt + Enter（用 literal flag 避免 tmux 解析特殊字符）。
 tmux send-keys -t "$SESSION" -l "$ENTRYPOINT $PROMPT"
 sleep 0.5
@@ -72,5 +135,8 @@ echo "log=$LOG"
 echo "sandbox=$SANDBOX"
 echo "plugin=$PLUGIN"
 echo "entrypoint=$ENTRYPOINT"
-echo "model=$MODEL"
+echo "requested_model=$MODEL"
+echo "actual_model=$ACTUAL_MODEL"
+echo "model_check=$MODEL_CHECK"
+echo "isolation=$ISOLATION"
 echo "prompt=$PROMPT"

@@ -1,15 +1,29 @@
 #!/usr/bin/env bash
 # obt-watch — 持续心跳监控。每 2 秒输出一行 NDJSON 状态供 Monitor 工具消费。
-# 设计：每行包含 ts、session 存活、最近 5 行末尾、距上次屏幕变化的秒数（idle_sec）。
+# 字段：
+#   alive            session 是否存活
+#   idle_sec         距上次屏幕变化的秒数
+#   busy             屏幕含 "esc to interrupt"，模型正在生成
+#   agents_waiting   "Waiting for N background agent" 的 N（主会话在等后台 worker）
+#   model            statusLine 解析出的真实模型（[MODEL:xxx]）
+#   current_stage    最新 .xft-comat/*/workflow.json 的 current_stage
+#   mode             同上的 mode
+#   tail             屏幕末 5 行
+# 客观卡死判定（见 SKILL.md）依赖 agents_waiting / busy / idle_sec 三者组合，
+# 不靠体感。agents_waiting>=1 时无论 idle 多大都不算卡死。
 set -euo pipefail
 
 SESSION="${XFT_COMAT_TMUX_SESSION:-xft-comat-test}"
+SANDBOX="${XFT_COMAT_SANDBOX:-$HOME/WorkSpace/xft-comat-sandbox}"
 INTERVAL="${XFT_COMAT_WATCH_INTERVAL:-2}"
 SNAP_HASH=""
 LAST_CHANGE=$(date +%s)
 
 # stderr 一个 ready 标记，方便 Monitor 知道脚本起来了。
 echo "[obt-watch] ready session=$SESSION interval=${INTERVAL}s" >&2
+
+# 去掉会破坏 JSON 的字符（statusLine/stage 都是简单 token）。
+sanitize() { printf '%s' "$1" | tr -d '"\\' | tr -d '\n'; }
 
 while true; do
   if ! tmux has-session -t "$SESSION" 2>/dev/null; then
@@ -24,9 +38,33 @@ while true; do
     LAST_CHANGE="$NOW"
   fi
   IDLE=$((NOW - LAST_CHANGE))
+
+  # busy：模型正在生成（可被中断）。
+  if printf '%s' "$SNAP" | grep -q 'esc to interrupt'; then BUSY=true; else BUSY=false; fi
+
+  # agents_waiting：主会话在等后台 worker 完成。
+  AGENTS=$(printf '%s' "$SNAP" | grep -oE 'Waiting for [0-9]+ background agent' | grep -oE '[0-9]+' | tail -1 || true)
+  [ -n "$AGENTS" ] || AGENTS=0
+
+  # model：statusLine 的 [MODEL:xxx]。
+  MODEL=$(printf '%s' "$SNAP" | grep -oE '\[MODEL:[^]]*\]' | tail -1 || true)
+  MODEL="${MODEL#\[MODEL:}"; MODEL="${MODEL%\]}"
+  [ -n "$MODEL" ] || MODEL="unknown"
+
+  # 工作流阶段：最新 workflow.json。
+  STAGE="null"; MODE="null"
+  WF=$(ls -t "$SANDBOX"/.xft-comat/*/workflow.json 2>/dev/null | head -1 || true)
+  if [ -n "$WF" ] && [ -f "$WF" ]; then
+    S=$(jq -r '.current_stage // empty' "$WF" 2>/dev/null || true)
+    M=$(jq -r '.mode // empty' "$WF" 2>/dev/null || true)
+    [ -n "$S" ] && STAGE="\"$(sanitize "$S")\""
+    [ -n "$M" ] && MODE="\"$(sanitize "$M")\""
+  fi
+
   # 末 5 行（用 jq 安全转义；没有 jq 时退化为空字符串）。
   TAIL=$(printf '%s' "$SNAP" | tail -n 5 | jq -Rsa . 2>/dev/null || echo '""')
-  printf '{"ts":"%s","session":"%s","alive":true,"idle_sec":%d,"tail":%s}\n' \
-    "$(date -Iseconds)" "$SESSION" "$IDLE" "$TAIL"
+
+  printf '{"ts":"%s","session":"%s","alive":true,"idle_sec":%d,"busy":%s,"agents_waiting":%d,"model":"%s","current_stage":%s,"mode":%s,"tail":%s}\n' \
+    "$(date -Iseconds)" "$SESSION" "$IDLE" "$BUSY" "$AGENTS" "$(sanitize "$MODEL")" "$STAGE" "$MODE" "$TAIL"
   sleep "$INTERVAL"
 done

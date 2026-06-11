@@ -37,7 +37,9 @@ description: 端到端测试 xft-comat 工作流插件（/xft-comat:pilot comman
 |------|------|
 | `~/WorkSpace/xft-comat` | 默认被测插件源码（`XFT_COMAT_PLUGIN`） |
 | `~/WorkSpace/xft-comat-sandbox` | 默认测试 sandbox（`XFT_COMAT_SANDBOX`），首次跑 `obt-init` 创建 |
+| `~/WorkSpace/xft-comat-sandbox/.claude-test-home` | 被测会话的隔离 `CLAUDE_CONFIG_DIR`（obt-init 生成，gitignored），脱离用户全局 `~/.claude` |
 | `.claude/skills/plugin-tester/scripts/obt-*` | 测试脚本，名称沿用 `obt-*` 以兼容旧调用 |
+| `.claude/skills/plugin-tester/scripts/fixtures/<name>/` | bugfix / refactor 预埋代码，`obt-reset --fixture <name>` 种入 sandbox |
 | `.claude/skills/plugin-tester/references/` | 测试 prompt 清单和 tmux 交互协议 |
 | `/tmp/xft-comat-test-<session>.log` | tmux pipe-pane 全量日志，Monitor 监听它 |
 
@@ -53,15 +55,29 @@ XFT_COMAT_SANDBOX=/Users/sofia/WorkSpace/xft-comat-sandbox \
 
 | 命令 | 作用 |
 |------|------|
-| `obt-init` | 首次创建空壳 sandbox（git init + 最小 Node 项目 + baseline commit） |
-| `obt-reset` | sandbox `git reset --hard` 到 baseline + `git clean -fdx`，清掉 `.xft-comat/` 和产物；每次重跑前必跑 |
-| `obt-start "<prompt>"` | 起 tmux 会话、`--plugin-dir` 加载插件、发送 `${XFT_COMAT_ENTRYPOINT:-/xft-comat:pilot} <prompt>` |
+| `obt-init` | 首次创建空壳 sandbox（git init + 最小 Node 项目 + baseline commit）+ 隔离 `.claude-test-home` |
+| `obt-reset [--fixture <name>]` | sandbox `git reset --hard` 到 baseline + `git clean -fdx`（保留隔离 home），清掉 `.xft-comat/` 和产物；每次重跑前必跑。`--fixture bugfix\|refactor` 额外种入预埋代码并 commit |
+| `obt-start "<prompt>"` | 起 tmux 会话、隔离 `CLAUDE_CONFIG_DIR` + `--plugin-dir` 加载插件、**核验模型**后发送 `${XFT_COMAT_ENTRYPOINT:-/xft-comat:pilot} <prompt>` |
 | `obt-snap [N]` | 抓当前 tmux 屏幕末 N 行（默认 200） |
 | `obt-send <text\|@key> ...` | 给 tmux 发输入；支持 `@Enter` `@Down` `@Up` `@Space` `@Tab` `@Escape` |
-| `obt-watch` | 每 2 秒输出一行 NDJSON 心跳；用 Monitor 工具跑它 |
+| `obt-watch` | 每 2 秒输出一行 NDJSON 心跳（含 `model` / `busy` / `agents_waiting` / `current_stage`）；用 Monitor 工具跑它 |
 | `obt-stop` | kill tmux，并 dump scrollback 到 `/tmp/xft-comat-test-*-final-*.log` |
 
-被测会话默认 `sonnet`，更接近真实工作流判断质量；需要省 token 或复现特定问题时用 `XFT_COMAT_MODEL=haiku|opus|sonnet` 覆盖。
+### 模型核验与隔离（务必先读）
+
+被测会话默认请求 `sonnet`（`XFT_COMAT_MODEL=haiku|opus|sonnet|<slug>` 覆盖）。但**请求的模型不等于实际跑的模型**：本机已排查无 managed-settings、无 shell/env 钉死、`~/.claude.json` 也无模型选择项，历史测试里 `--model sonnet` 仍被改写成 `deepseek-v4-flash`，说明改写发生在**账号或网关服务端**——`CLAUDE_CONFIG_DIR` 隔离压不住它。
+
+因此 `obt-start` 在发 prompt 前从隔离 home 的 statusLine 解析 `[MODEL:xxx]`，与请求模型比对：
+
+- `model_check=OK` —— 实际与请求一致，正常继续。
+- `model_check=MISMATCH` —— **默认拒绝启动并非零退出**（kill 会话），输出 `actual_model=<x>`。这是防止“以为在测 sonnet 实际跑 deepseek”污染结论的唯一闸门。
+  - 若该环境只能服务某模型：显式 `XFT_COMAT_MODEL=<actual>` 重跑，核验转 OK，报告如实标注该模型。
+  - 确知不符仍要继续（调试）：`XFT_COMAT_ALLOW_MODEL_MISMATCH=1` 放行，输出转 `MISMATCH_ALLOWED`，报告**必须**写 `actual_model`。
+- `model_check=UNKNOWN` —— 没解析到 statusLine，无法核验；人工确认后再决定是否继续。
+
+隔离（`CLAUDE_CONFIG_DIR=$SANDBOX/.claude-test-home`）让被测会话脱离用户全局 `~/.claude`：不加载第三方插件（如 security-guidance 的 Stop hook，历史上被误记为工作流“卡死”）、不继承全局 model/statusLine。隔离 home 引发登录/信任异常时，`XFT_COMAT_NO_ISOLATION=1` 可关隔离但仍保留模型核验。
+
+**每轮报告必须引用 `obt-start` 输出的 `actual_model` 与 `model_check`，不得假设。**
 
 ## 被测行为模型
 
@@ -195,10 +211,12 @@ worker 层：
 
 ```bash
 obt-init
-obt-reset
+obt-reset                      # feature-simple / feature-medium / feature-hard
+obt-reset --fixture bugfix     # bugfix 用例：种入带 bug 的 parseDuration.js
+obt-reset --fixture refactor   # refactor 用例：种入内联的 cart.js
 ```
 
-`obt-reset` 是每个 prompt 开始前的动作，不是跑完后自动清理；跑完后保留产物方便用户检查。
+`obt-reset` 是每个 prompt 开始前的动作，不是跑完后自动清理；跑完后保留产物方便用户检查。`bugfix` / `refactor` 必须带对应 `--fixture`，否则被测会话面对空 sandbox 会把“新建文件”合理地判成 feature——这是测试用例的问题，不是插件 bug。
 
 ### 2. 选 prompt
 
@@ -218,6 +236,8 @@ obt-reset
 obt-start "<prompt 原文>"
 ```
 
+**先看 `obt-start` 输出的 `model_check`**：非零退出或 `model_check=MISMATCH` 时会话已被 kill，不要继续——按上面「模型核验」处置。`model_check=OK` 或 `MISMATCH_ALLOWED` 才往下走，并记下 `actual_model` 备报告引用。
+
 然后用 Monitor 工具运行：
 
 ```bash
@@ -228,13 +248,20 @@ obt-watch
 
 ### 4. 根据心跳行动
 
+读心跳的新字段，不靠体感判断：
+
 | 心跳信号 | 处理 |
 |----------|------|
+| `busy:true`（含 `esc to interrupt`） | 模型正在生成，继续监听，**无论 idle 多大都不算卡死** |
+| `agents_waiting >= 1` | 主会话在等后台 worker，这是预期等待；**继续监听，不要 kill**（worker 可能跑数分钟） |
 | `tail` 出现问题、选项列表、`↑↓` 提示 | 用 `obt-snap` 看完整问题，按 `references/interaction-protocol.md` 应答 |
-| `idle_sec > 30` 且无 `esc to interrupt` | 可能等用户输入或卡住；`obt-snap` 判断 |
-| 出现 `完成` / `交付` / `close` / `Done` 且 idle > 20 | 进入结果判定 |
+| `current_stage` 变化 | 工作流在推进，记录阶段轨迹 |
+| 命中下方「客观卡死标准」 | 才按卡死处置 |
 | `event: session_ended` | `obt-stop` 获取 dump，判断正常退出还是崩溃 |
-| tail 持续变化且含 `esc to interrupt` | Claude Code 仍在执行，继续监听 |
+
+**客观卡死标准（同时满足才算卡死）**：`agents_waiting == 0` ∧ `busy:false` ∧ `idle_sec >= 120` ∧ 连续 3 拍 `tail`（屏幕）无变化。任一不满足都继续等。
+
+**agent 完成后主会话不动的专项**：屏幕显示某 agent 已 `completed`／`Done` 但 `agents_waiting` 归零后主会话 90s 无新动作、`current_stage` 不变——先 `obt-snap 200` 留证，记录「agent 完成时刻 vs 当前时刻」时间线，再试 `obt-send @Escape` 唤醒；仍无反应才 kill，判 `PARTIAL` 并标注「疑似 agent 完成通知缺陷」（这才是历史上“review 卡通知”应有的证据，而不是没等够就 kill）。
 
 ### 5. 应答澄清和决策
 
@@ -245,9 +272,19 @@ obt-watch
 - 对 `feature-hard`，保留更丰富的设计抉择；对 `feature-simple` / `bugfix`，偏轻量。
 - 发完输入后 `obt-snap` 复核是否进入下一步。
 
+**轮询纪律**：`obt-snap` 只在心跳触发时用（出现问题/选项、命中卡死标准、需要留证），不要主会话循环 snap 当心跳——那是 Monitor + `obt-watch` 的活。15 秒内连续 `obt-snap` 超过 3 次即 tester 自身违规（历史上 6 分钟 snap 80 次，既烧上下文又诱发急躁 kill）。
+
 ### 6. 判定结果
 
-跑完一个 prompt 后检查：
+每个 prompt 落一个三态判定，不允许把没跑完的算成功：
+
+- **PASS** —— 走到 `close`、`validate` 通过、全程无反模式。
+- **PARTIAL** —— 任何人为/环境中断（提前 kill、模型核验放行、上下文吃紧、agent 通知专项等）。报告必须分「已验证 / 未验证」两栏，未验证项逐条列（如 fix-skip、final-verify、validate 门禁、close 汇报）。
+- **FAIL** —— 命中反模式或工作流出错。
+
+**硬规则：没有观测到 `close`，禁止使用「通过 / ✅ 通过」字样**——最多是 PARTIAL。历史报告把 review 中途 kill、plan 跑一半 kill 都写成「✅ 通过」，这次不允许。
+
+到达 close 的，逐项核对：
 
 - 实际 mode 是否符合预期；如果不符合，理由是否充分。
 - `.xft-comat/<run>/workflow.json` 的 stage 是否推进合理。
@@ -258,7 +295,7 @@ obt-watch
 - 测试和验证是否真实运行，失败是否被记录和处理。
 - agent 使用是否最小、命名是否正确、职责是否干净。
 
-命中反模式时立即：
+命中反模式（FAIL）时立即：
 
 ```bash
 obt-stop
@@ -268,15 +305,19 @@ obt-stop
 
 ### 7. 单 prompt 报告格式
 
-跑通无反模式时简短报告：
+每个 prompt 的报告**必填以下字段，缺任一字段即报告不合格**：
 
-- prompt 摘要、预期 mode、实际 mode、一句话判定。
-- 澄清轮次和是否只问阻塞问题。
+- **判定**：PASS / PARTIAL / FAIL（遵守「无 close 不写通过」）。
+- **actual_model + model_check**：取自 `obt-start` 输出，不得假设（历史报告全程没提实际跑的是 deepseek）。
+- prompt 摘要、预期 mode、实际 mode；fixture（如有，如 `--fixture bugfix`）。
+- 最深到达的 stage；是否到 `close`；`validate` 输出。
+- 澄清轮次：是否一次一问、是否只问阻塞问题、是否走了提问工具（非纯文本）。
 - workflowctl 命令链是否完整：route / init / advance / next / set-doc / submit / skills list / record-skill / record-stage / check-test。
-- 关键文档路径：`.xft-comat/<run>/...`。
 - worker 使用：各阶段分派的 worker 变体是否正确（读写/只读）、是否装载了对应方法论 skill、阶段执行记录是否完整。
 - 测试结果：命令、PASS/FAIL、测试轮次。
-- 产出文件和残余风险。
+- **未覆盖清单**：本轮没观测到的环节（如 decide / fix-skip / final-verify / close 门禁），PARTIAL 必列。
+- 中断原因与时间线（PARTIAL/FAIL 必填）。
+- 产出文件、残余风险、dump + pipe 路径。
 
 不要自动 `obt-reset`；等用户确认继续下一轮再重置。
 
@@ -284,8 +325,9 @@ obt-stop
 
 | 状况 | 处置 |
 |------|------|
+| `obt-start` 非零退出 / `model_check=MISMATCH` | 模型被服务端改写；显式 `XFT_COMAT_MODEL=<actual_model>` 重跑，或确知后 `XFT_COMAT_ALLOW_MODEL_MISMATCH=1` 放行并标注 |
 | tmux session 退出 | `obt-stop` 看 dump，搜 `Error` / `Traceback` / `panic` / `permission` |
-| Claude 起不来或卡 trust | `obt-start` 已用 bypass permissions；仍卡则检查 sandbox 的 Claude 项目记录 |
+| Claude 起不来或卡 trust | 隔离 home 已预接受 onboarding/trust；仍卡则 `XFT_COMAT_NO_ISOLATION=1` 回退非隔离，或检查 keychain 登录态 |
 | 澄清或 AskUserQuestion 节奏对不上 | 先 `obt-snap` 看焦点；必要时 `@Escape` 或 `obt-stop` 重来 |
 | `workflowctl.ts` 报错 | 插件 bug 或测试脚本 cwd/env 错；抓命令和错误输出后定位 |
 | 工作流目录不符合预期 | 判断是 pilot command 违规、脚本 bug，还是 prompt 不适合作为该 mode 用例 |
@@ -295,10 +337,10 @@ obt-stop
 
 第一次改完 tester skill 后：
 
-1. `obt-init` 创建 sandbox。
-2. `obt-reset` 确认可回到 baseline。
-3. 用 `feature-simple` 的 slugify prompt 跑一轮 `obt-start`。
-4. 用 Monitor 监听 `obt-watch`，确认 NDJSON 心跳正常。
+1. `obt-init` 创建 sandbox 和隔离 `.claude-test-home`。
+2. `obt-reset` 确认可回到 baseline；`obt-reset --fixture bugfix` 确认能种入 fixture 且 `node --test` 现状全绿。
+3. 用 `feature-simple` 的 normalizeTags prompt 跑一轮 `obt-start`，确认 `model_check` 与 `actual_model` 符合预期（不符按「模型核验」处置）。
+4. 用 Monitor 监听 `obt-watch`，确认 NDJSON 心跳含 `model` / `busy` / `agents_waiting` / `current_stage` 字段。
 5. 交互完成后检查 `.xft-comat` 记录和 `obt-stop` dump。
 
 通路问题先修 `.claude/skills/plugin-tester/scripts/`；行为问题再修 `xft-comat` 插件本体。

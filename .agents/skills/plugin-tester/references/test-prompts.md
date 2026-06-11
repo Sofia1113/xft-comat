@@ -2,7 +2,7 @@
 
 5 个用例分别覆盖 `feature-simple`、`feature-medium`、`feature-hard`、`bugfix`、`refactor`。验证“所有 workflow/mode”时一轮全跑，至少每种 mode 一条。
 
-sandbox 是空壳 Node 项目（`README.md`、`package.json`、占位 `npm test`）。每个 prompt 都自带足够上下文，让被测插件从零创建或修改文件。
+sandbox 是空壳 Node 项目（`README.md`、`package.json`、占位 `npm test`）。`feature-*` 三个用例从零创建文件，prompt 自带足够上下文。`bugfix` 和 `refactor` 的前提是“项目里已有代码”，所以靠 fixture 预埋：运行前必须 `obt-reset --fixture bugfix` / `obt-reset --fixture refactor` 先把待修/待重构的真实代码种进 sandbox（见各用例的「运行前置」），prompt 只描述现象、不贴代码、不要求“新建文件”。
 
 每个用例都只写用户真实需求，不写“使用哪个 mode”“先 route 再 implement”之类工作流指令。mode 必须由 `/pilot` command 自己判断。
 
@@ -92,55 +92,49 @@ sandbox 是空壳 Node 项目（`README.md`、`package.json`、占位 `npm test`
 
 ## bugfix — 明确复现和根因的 localized 修复
 
+**运行前置**: `obt-reset --fixture bugfix` —— 把带 bug 的 `src/parseDuration.js`（`'1h30m'` 正常但 `'30m'`/`'1h'` 抛错）和只覆盖 happy path 的测试种进 sandbox 并 commit。被测会话面对的是“项目里已存在、已提交”的代码，不是空白文件。
+
 **prompt**:
 
-````text
-下面这个时长解析函数，`'1h30m'` 能正确解析成 90，但只有分钟的输入如 `'30m'` 会抛错。请把它建到 `src/parseDuration.js`，先用测试复现这个 bug，再修好，让缺小时或缺分钟的输入都能正确解析。
-
-```js
-function parseDuration(s) {
-  const h = s.match(/(\d+)h/)[1];
-  const m = s.match(/(\d+)m/)[1];
-  return Number(h) * 60 + Number(m);
-}
+```text
+项目里的 `src/parseDuration.js` 有问题：`parseDuration('1h30m')` 能正确解析成 90，但 `parseDuration('30m')` 抛 `TypeError: Cannot read properties of null (reading '1')`。请修好，让只有小时或只有分钟的输入也能正确解析，并补上回归测试。
 ```
 
-报错：`parseDuration('30m')` → `TypeError: Cannot read properties of null (reading '1')`
-````
-
-**预期 mode**: `bugfix` — 用户描述了错误、复现输入和异常，范围集中在单函数。
+**预期 mode**: `bugfix` — 用户描述了错误、复现输入和异常，且代码已在仓库里，范围集中在单函数。
 
 **关键观察点**：
 
-- ✅ 定级 `bugfix`，不是 feature。
-- ✅ 先记录复现和根因：`match` 返回 `null` 仍取 `[1]`。
-- ✅ 先写失败回归测试，再改实现。
+- ✅ 定级 `bugfix`，不是 feature（代码已存在，是修而非建）。
+- ✅ investigate 阶段先读现有代码、复现 `'30m'` 抛错，记录根因：`s.match(/(\d+)h/)` 在缺小时段时返回 `null`，仍取 `[1]`。
+- ✅ 先写失败回归测试（`'30m'` 当前抛错），再改实现，再转绿。
 - ✅ 测试覆盖 `'30m'`、`'1h'`、`'1h30m'`、非法或空输入的预期行为（若澄清后确定）。
-- ❌ 反模式：跳过复现；升成 hard；引入无关模块；没有回归测试。
+- ❌ 反模式：跳过 investigate/复现直接改；升成 hard；把“代码尚不存在”当理由判成 feature；引入无关模块；没有回归测试。
 
-**决策模拟参考**: 若问非法输入如何处理，选保守方案：抛出明确错误或返回 0，但要选一个并要求测试固定。其余交互尽量少往返。
+**决策模拟参考**: 若问非法输入如何处理，选保守方案：抛出明确错误或返回 NaN，但要选一个并要求测试固定。其余交互尽量少往返。
 
 ---
 
 ## refactor — 行为不变的结构整理
 
+**运行前置**: `obt-reset --fixture refactor` —— 把所有逻辑（行小计、按项 `discountPercent` 折扣、累加、两位小数舍入）全内联在一个函数里的 `src/cart.js`，以及覆盖累加/折扣/舍入的行为基线测试种进 sandbox 并 commit。
+
 **prompt**:
 
 ```text
-我有一个内联在 `src/cart.js` 里的购物车总价计算逻辑，请先创建这个文件和测试：商品包含 `price`、`quantity`，支持百分比折扣 `discountPercent`，总价保留两位小数。然后在不改变现有行为的前提下，把计算逻辑重构成更容易测试和复用的小函数，保留等价性验证。
+`src/cart.js` 里的购物车总价计算逻辑全内联在一个函数里，越来越难维护。请在不改变现有行为的前提下，把它重构成更容易测试和复用的小函数，现有测试必须保持通过。
 ```
 
-**预期 mode**: `refactor` — 用户明确要求行为不变的结构改善，并要求等价性验证。
+**预期 mode**: `refactor` — 用户明确要求行为不变的结构改善，代码已存在，要求等价性。
 
 **关键观察点**：
 
-- ✅ 定级 `refactor`，不走新功能设计流程。
-- ✅ 记录行为基线、安全网和等价验证。
-- ✅ 先建立测试保护，再拆函数。
-- ✅ 不改变价格、折扣和四舍五入行为。
-- ❌ 反模式：当成 feature-medium；新增不必要业务能力；无基线直接重构；验证只跑 happy path。
+- ✅ 定级 `refactor`，不走新功能设计流程（是整理已有代码，不是加功能）。
+- ✅ investigate/plan 阶段先记录行为基线、安全网（现有测试）和等价验证策略。
+- ✅ 先确认/补足测试保护，再拆函数。
+- ✅ 不改变价格、折扣和四舍五入行为；重构后现有测试仍全绿。
+- ❌ 反模式：当成 feature；新增不必要业务能力；无基线直接重构；验证只跑 happy path；改变外部行为。
 
-**决策模拟参考**: 如果问折扣边界，选择保守且可测的规则：`discountPercent` 缺省为 0，范围 0-100，越界抛错。强调“行为固定后再重构”。
+**决策模拟参考**: 如果问折扣边界等扩展，保守拒绝——强调“本次只重构、行为固定不变”，不借机加规则。
 
 ---
 

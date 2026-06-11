@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
-# obt-reset — 把 sandbox 重置到 baseline commit。清掉本轮测试生成的源码 / .xft-comat/ / node_modules 等。
-# 保留 .git。如果 baseline 不存在则先调用 obt-init。
+# obt-reset [--fixture <name>] — 把 sandbox 重置到 baseline commit。
+# 清掉本轮测试生成的源码 / .xft-comat/ / node_modules 等，保留 .git 与隔离 home。
+# 如果 baseline 不存在则先调用 obt-init。
+#
+# --fixture <name>：reset 后把 scripts/fixtures/<name>/ 预埋进 sandbox 并 commit
+#   成一个 seed commit，让 bugfix/refactor 这类“项目里已有代码”的场景有真实起点。
+#   再次 obt-reset（不带 --fixture）会回到第一个 baseline，清掉 seed。
 set -euo pipefail
 
 SANDBOX="${XFT_COMAT_SANDBOX:-$HOME/WorkSpace/xft-comat-sandbox}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+FIXTURE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fixture) FIXTURE="${2:?--fixture 需要一个名称}"; shift 2 ;;
+    --fixture=*) FIXTURE="${1#--fixture=}"; shift ;;
+    *) echo "usage: obt-reset [--fixture <name>]" >&2; exit 1 ;;
+  esac
+done
 
 if [ ! -d "$SANDBOX/.git" ]; then
   exec "$SCRIPT_DIR/obt-init"
@@ -12,11 +26,35 @@ fi
 
 cd "$SANDBOX"
 
-# 硬重置到 baseline（第一个 commit），删除所有 untracked / ignored 文件。
+# 硬重置到 baseline（第一个 commit），删除所有 untracked / ignored 文件，
+# 但保留隔离 home（.claude-test-home 是 gitignored，-x 会误删，需显式排除）。
 BASELINE=$(git rev-list --max-parents=0 HEAD | head -1)
 git reset --hard -q "$BASELINE"
-git clean -fdxq
+git clean -fdxq -e .claude-test-home
+
+# 隔离 home 若缺失（首次或被外部删除），重建脚手架。
+if [ ! -f "$SANDBOX/.claude-test-home/settings.json" ]; then
+  "$SCRIPT_DIR/obt-init" >/dev/null
+fi
 
 echo "sandbox=$SANDBOX"
 echo "reset_to=$BASELINE"
+
+# fixture 预埋。
+if [ -n "$FIXTURE" ]; then
+  FIXTURE_DIR="$SCRIPT_DIR/fixtures/$FIXTURE"
+  if [ ! -d "$FIXTURE_DIR" ]; then
+    echo "ERROR: fixture 不存在：$FIXTURE_DIR" >&2
+    echo "可用 fixtures：$(ls "$SCRIPT_DIR/fixtures" 2>/dev/null | tr '\n' ' ')" >&2
+    exit 1
+  fi
+  # 拷贝 fixture 内容（含 src/ test/ 等）到 sandbox 根。
+  cp -R "$FIXTURE_DIR/." "$SANDBOX/"
+  git add -A
+  git -c commit.gpgsign=false commit -q -m "seed: $FIXTURE fixture"
+  echo "seeded=$FIXTURE"
+  echo "seed_commit=$(git rev-parse HEAD)"
+fi
+
+echo "head=$(git rev-parse HEAD)"
 echo "tree_clean=$(git status --short | wc -l | xargs)"

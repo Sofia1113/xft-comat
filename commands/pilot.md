@@ -125,7 +125,7 @@ node "${CLAUDE_PLUGIN_ROOT}/workflow/pilot/scripts/workflowctl.ts" --help
 
 ### 1. 探索
 
-分派 `worker-ro` agent 做只读项目探索：分派提示给出用户原始请求，并要求它先 `Read` 插件的 `skills/explore-project/SKILL.md`（路径用 `${CLAUDE_PLUGIN_ROOT}/skills/explore-project/SKILL.md` 拼出；此时尚无 task-dir，结果直接返回，不落库），得到技术栈、相关文件、现有测试、风险信号和"代码无法回答的问题"。当前运行时没有 agent 分派能力时，在主会话按同一 skill 做只读探索，并在 `00-routing.md` 记录 fallback。**该 fallback 仅限探索这一步**——它不允许跳过 workflowctl 流程，也不允许主会话接管后续任何实现/审查阶段。
+分派 `worker-ro` agent 做只读项目探索：分派提示给出用户原始请求，并要求它用 `Skill` 工具调用 `explore-project` skill（此时尚无 task-dir，结果直接返回，不落库），得到技术栈、相关文件、现有测试、风险信号和"代码无法回答的问题"。当前运行时没有 agent 分派能力时，在主会话按同一 skill 做只读探索，并在 `00-routing.md` 记录 fallback。**该 fallback 仅限探索这一步**——它不允许跳过 workflowctl 流程，也不允许主会话接管后续任何实现/审查阶段。
 
 ### 2. 澄清（还原用户想法）
 
@@ -166,7 +166,7 @@ node <script> advance --task-dir <task-dir> --stage <advance_to>
 ```
 
 - **`dispatch.kind == "main"` 且 `stage == "close"`** → 执行下方"收尾"。
-- **`dispatch.kind == "agent"`** → 分派 `dispatch.agent` 指名的 worker 变体（`worker` 读写 / `worker-ro` 只读）。分派提示保持精简，worker 会**自己跑 `next` 取完整分派包**（skill_paths、输入白名单、质量门禁、record_instructions），避免主会话转述丢字段；提示只需写明：
+- **`dispatch.kind == "agent"`** → 分派 `dispatch.agent` 指名的 worker 变体（`worker` 读写 / `worker-ro` 只读）。分派提示保持精简，worker 会**自己跑 `next` 取完整分派包**（apply_skills、输入白名单、质量门禁、record_instructions），避免主会话转述丢字段；提示只需写明：
   - `script_path` 与 `task_dir`（worker 用它执行 `node <script> next --task-dir <task-dir>`）。
   - 当前 `stage` 与一句话任务背景（`inputs.summary` 即可）。
   - 分派成功、worker 完成自录后，执行 `advance --task-dir <task-dir> --stage <advance_to>`，回到循环。

@@ -40,7 +40,12 @@ if [ ! -f .gitignore ]; then
 node_modules/
 .DS_Store
 .xft-comat/
+.claude-test-home/
 EOF
+fi
+# 已存在的旧 sandbox 也要忽略隔离 home（幂等补写）。
+if ! grep -qx '.claude-test-home/' .gitignore 2>/dev/null; then
+  printf '.claude-test-home/\n' >> .gitignore
 fi
 
 # 初始 commit（让 reset 有锚点）
@@ -49,5 +54,54 @@ if [ -z "$(git log --oneline 2>/dev/null || true)" ]; then
   git -c commit.gpgsign=false commit -q -m "init: sandbox baseline"
 fi
 
+# ── 隔离 config-home ──────────────────────────────────────────────
+# 被测会话用 CLAUDE_CONFIG_DIR 指向这里，与用户全局 ~/.claude 解耦：
+#   - 不加载全局 enabledPlugins（掐掉 security-guidance 等第三方 Stop hook）
+#   - 不继承全局 model / 自定义 statusLine
+#   - 用一个只输出 [MODEL:xxx] 的 statusLine 作为模型核验通道
+# 凭证走 keychain（用户级，隔离后仍可用）；文件型凭证存在时一并拷入。
+TEST_HOME="$SANDBOX/.claude-test-home"
+mkdir -p "$TEST_HOME"
+SANDBOX_ABS="$SANDBOX" python3 - "$TEST_HOME" <<'PY'
+import json, os, sys
+home = sys.argv[1]
+sandbox = os.environ["SANDBOX_ABS"]
+
+# statusLine 只输出 [MODEL:<display_name 或 id>]，供 obt-start / obt-watch 解析真实模型。
+settings = {
+    "enabledPlugins": {},
+    "statusLine": {
+        "type": "command",
+        "command": (
+            "python3 -c \"import json,sys; d=json.load(sys.stdin); "
+            "m=(d.get('model',{}).get('display_name') or d.get('model',{}).get('id') or 'unknown'); "
+            "print('[MODEL:'+m+']')\""
+        ),
+    },
+}
+with open(os.path.join(home, "settings.json"), "w") as f:
+    json.dump(settings, f, indent=2, ensure_ascii=False)
+
+# 预接受 onboarding + sandbox 项目信任，避免首启卡 trust/onboarding 弹窗。
+config = {
+    "hasCompletedOnboarding": True,
+    "bypassPermissionsModeAccepted": True,
+    "projects": {
+        sandbox: {
+            "hasTrustDialogAccepted": True,
+            "hasCompletedProjectOnboarding": True,
+        }
+    },
+}
+with open(os.path.join(home, ".claude.json"), "w") as f:
+    json.dump(config, f, indent=2, ensure_ascii=False)
+PY
+
+# 文件型凭证存在时拷入隔离 home；keychain 型无需处理。
+if [ -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$TEST_HOME/.credentials.json" ]; then
+  cp "$HOME/.claude/.credentials.json" "$TEST_HOME/.credentials.json"
+fi
+
 echo "sandbox=$SANDBOX"
 echo "baseline_commit=$(git rev-parse HEAD)"
+echo "test_home=$TEST_HOME"
